@@ -8,6 +8,7 @@ import {buildTaskNotification,showTaskNotification} from './core/notify';
 import {HEALTH_CHECK_ALARM,getCachedHealth,isHealthAlert,refreshHealthIfNeeded} from './core/health';
 import {resolveCsdnCategories,shouldConfirmDraftUpdate} from './core/settings';
 import {fetchJuejinDraftByArticleId,fetchJuejinDraftByDraftId} from './source/juejin-api';
+import {privateJuejinImages,refreshJuejinImageUrls} from './source/juejin-images';
 import {csdnAdapter} from './targets/csdn';
 import {buildDryRunReport,checkCsdnAuth,fetchCsdnArticleState,fetchCsdnCategories,saveDraftViaApi,validateCsdnArticle} from './targets/csdn-api';
 import {checkWechatAuth,requireWechatAccount,saveWechatDraft} from './targets/wechat-api';
@@ -67,17 +68,27 @@ async function runTask(task:SyncTask){
       if(task.zhihuAccountId&&auth.accountId!==task.zhihuAccountId)throw new SyncError('当前知乎账号与任务创建时不一致，已阻止覆盖草稿','blocked','authentication');
     }
     let article=await ensureArticleContent(task.article);
+    const settings=await getSettings();
+    let freshDraft:Article|undefined;
+    const imageSource=task.platform==='wechat'||settings.syncCover!==false?article:{...article,cover:undefined};
+    // 首次同步使用发布前快照；私有图片须从发布后的草稿详情刷新地址。重试已回填正文，无需重复读取。
+    if(task.article.markdown.trim().length>=20&&article.sourceDraftId&&privateJuejinImages(imageSource).length){
+      stage='content';
+      const uuid=await getJuejinUuid();
+      if(!uuid)throw new SyncError('无法刷新掘金私有图片地址，请刷新掘金页面后重试','content','images');
+      freshDraft=await fetchJuejinDraftByDraftId(article.sourceDraftId,uuid,article.title);
+      article=refreshJuejinImageUrls(article,freshDraft);
+    }
     // 发布面板的封面可能尚未被主世界缓存捕获；微信正式同步前按草稿详情补齐封面、摘要和标签。
     if(task.platform==='wechat'&&article.cover===undefined&&article.sourceDraftId){
       const uuid=await getJuejinUuid();
       if(uuid){
-        const fresh=await fetchJuejinDraftByDraftId(article.sourceDraftId,uuid,article.title);
+        const fresh=freshDraft??await fetchJuejinDraftByDraftId(article.sourceDraftId,uuid,article.title);
         article={...article,cover:fresh.cover||'',summary:article.summary??fresh.summary,tags:article.tags.length?article.tags:fresh.tags};
       }
       else throw new SyncError('尚未读取源草稿封面，请刷新掘金编辑器并保存草稿后重试','content','validation');
     }
     if(task.platform==='csdn')validateCsdnArticle(article);
-    const settings=await getSettings();
     const platformName=task.platform==='wechat'?'微信公众号':task.platform==='cnblogs'?'博客园':task.platform==='zhihu'?'知乎':'CSDN';
     await patchTask(task.id,{status:'checking-login',attempts:task.attempts+1,error:undefined,diagnostic:undefined,warnings:undefined,stats:undefined,progress:{current:0,total:0,message:`正在检查${platformName}登录状态`}});
     const transformed=task.platform==='csdn'?csdnAdapter.transform(article):article;

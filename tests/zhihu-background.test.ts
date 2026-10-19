@@ -1,6 +1,6 @@
 // 后台知乎同步消息链路回归：真实任务存储配合模拟知乎 API，验证账号隔离与草稿状态边界。
 import {afterEach,beforeEach,describe,expect,it,vi} from 'vitest';
-import type {SyncTask} from '../src/types';
+import type {Article,SyncTask} from '../src/types';
 
 const platform=vi.hoisted(()=>({
   account:'知乎测试员',
@@ -10,7 +10,8 @@ const platform=vi.hoisted(()=>({
   twoPhaseFailure:false,
   draftState:'draft' as 'draft'|'published'|'missing'|'unauthorized'|'unknown',
   writes:0,
-  lastArticleId:undefined as string|undefined
+  lastArticleId:undefined as string|undefined,
+  lastArticle:undefined as Article|undefined
 }));
 
 vi.mock('../src/targets/zhihu-api',async()=>{
@@ -34,6 +35,7 @@ vi.mock('../src/targets/zhihu-api',async()=>{
         throw new SyncError('当前登录的知乎账号与目标账号不一致','blocked','authentication');
       }
       platform.writes++;
+      platform.lastArticle=article;
       platform.lastArticleId=options.articleId;
       if(platform.twoPhaseFailure){
         const stage1Id='stage1-id-999';
@@ -88,6 +90,7 @@ beforeEach(async()=>{
   platform.draftState='draft';
   platform.writes=0;
   platform.lastArticleId=undefined;
+  platform.lastArticle=undefined;
   store={syncTasks:[]};
   sessionStore={};
   vi.stubGlobal('chrome',{
@@ -125,6 +128,39 @@ afterEach(()=>{
 });
 
 describe('后台知乎同步消息链路', ()=>{
+  it('发布快照先刷新同资源私有图片，再进入目标适配器，保留提交时元数据',async()=>{
+    const path='/tos-cn-i-73owjymdk6/image-a~tplv-watermark.awebp';
+    const oldUrl=`https://p0-xtjj-private.juejin.cn${path}?x-orig-sign=old`;
+    const newUrl=`https://p6-xtjj-sign.byteimg.com${path}?x-signature=new`;
+    const snapshot={...article,sourceDraftId:'2',summary:'',markdown:`提交时的正文保留，不能被发布后的编辑覆盖。\n![图](${oldUrl})`,cover:oldUrl};
+    store.juejinUuid='test-uuid';
+    const fetch=vi.fn(async(_input:RequestInfo|URL,_init?:RequestInit)=>Response.json({err_no:0,data:{article_draft:{id:'2',title:'后续标题',mark_content:`后来修改的正文不应替换发布时快照。\n![图](${newUrl})`,brief_content:'后续摘要',cover_image:'https://example.com/other.png'}}}));
+    vi.stubGlobal('fetch',fetch);
+    const result=await send({type:'SYNC_NEW_ARTICLE',platform:'zhihu',article:snapshot,accountId:'member_a'});
+    expect(result.task.status).toBe('saved');
+    expect(platform.lastArticle).toEqual({...snapshot,markdown:snapshot.markdown.replace(oldUrl,newUrl),cover:newUrl});
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(String(fetch.mock.calls[0][1]?.body))).toEqual({draft_id:'2'});
+  });
+
+  it('关闭封面同步且正文没有私有图片时，不读取源接口',async()=>{
+    store.settings={syncCover:false};
+    const fetch=vi.fn();
+    vi.stubGlobal('fetch',fetch);
+    const result=await send({type:'SYNC_NEW_ARTICLE',platform:'zhihu',accountId:'member_a',article:{...article,sourceDraftId:'2',cover:'https://p0-xtjj-private.juejin.cn/tos-cn-i-73owjymdk6/cover.png?x-orig-sign=old'}});
+    expect(result.task.status).toBe('saved');
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it('刷新私有图片的源接口失败时，不写目标草稿并保留可重试状态',async()=>{
+    store.juejinUuid='test-uuid';
+    vi.stubGlobal('fetch',vi.fn(async()=>new Response('',{status:503})));
+    const result=await send({type:'SYNC_NEW_ARTICLE',platform:'zhihu',accountId:'member_a',article:{...article,sourceDraftId:'2',cover:'https://p0-xtjj-private.juejin.cn/tos-cn-i-73owjymdk6/cover.png?x-orig-sign=old'}});
+    expect(result.ok).toBe(false);
+    expect(platform.writes).toBe(0);
+    expect(store.syncTasks[0]).toMatchObject({status:'failed',diagnostic:{category:'network'}});
+  });
+
   it('任务与映射绑定当前知乎账号，同一篇文章在另一账号单独建档',async()=>{
     const first=await send({type:'SYNC_NEW_ARTICLE',platform:'zhihu',article,zhihuAccountId:'member_a'});
     expect(first.task).toMatchObject({status:'saved',zhihuAccountId:'member_a',zhihuArticleId:'draft-member_a'});
