@@ -8,6 +8,17 @@ type ApiResponse<T>={err_no:number;err_msg:string;data:T};
 type ArticleListItem={article_info?:{article_id?:string;draft_id?:string;title?:string;brief_content?:string;cover_image?:string};tags?:{tag_name?:string}[]};
 type DraftDetail={article_draft?:{id?:string;title?:string;mark_content?:string;brief_content?:string;cover_image?:string;tags?:{tag_name?:string}[]}};
 
+export type JuejinArticleCache=Map<string,ArticleListItem>;
+
+export function createJuejinArticleCache():JuejinArticleCache{
+  return new Map<string,ArticleListItem>();
+}
+
+export function cacheJuejinArticleItem(item:ArticleListItem,cache?:JuejinArticleCache){
+  const id=String(item.article_info?.article_id||'');
+  if(id&&cache)cache.set(id,item);
+}
+
 async function post<T>(path:string,body:unknown,uuid:string):Promise<T>{
   if(!uuid)throw new SyncError('无法读取掘金请求标识，请刷新文章列表后重试','platform-change','content');
   const query=new URLSearchParams({aid:'2608',uuid,spider:'0'});
@@ -53,10 +64,10 @@ export async function fetchJuejinDraftByDraftId(draftId:string,uuid:string,title
   };
 }
 
-/** 历史文章先经 list_by_user 反查草稿 ID，再读取原始 Markdown。 */
-export async function fetchJuejinDraftByArticleId(articleId:string,uuid:string,titleFallback=''):Promise<Article>{
+/** 历史文章先经 list_by_user 反查草稿 ID，再读取原始 Markdown。可传入外部缓存加速批量反查。 */
+export async function fetchJuejinDraftByArticleId(articleId:string,uuid:string,titleFallback='',cache?:JuejinArticleCache):Promise<Article>{
   const pageSize=100;
-  let entry:ArticleListItem|undefined;
+  let entry=cache?.get(articleId);
   for(let pageNo=1;!entry;pageNo++){
     const articles=await post<ArticleListItem[]>('/article/list_by_user',{
       page_no:pageNo,
@@ -64,7 +75,15 @@ export async function fetchJuejinDraftByArticleId(articleId:string,uuid:string,t
       audit_status:null,
       status:null
     },uuid);
-    entry=articles.find(item=>String(item.article_info?.article_id||'')===articleId);
+    if(cache){
+      for(const item of articles){
+        const id=String(item.article_info?.article_id||'');
+        if(id)cache.set(id,item);
+      }
+      entry=cache.get(articleId);
+    }else{
+      entry=articles.find(item=>String(item.article_info?.article_id||'')===articleId);
+    }
     if(entry||articles.length<pageSize)break;
   }
   const draftId=entry?.article_info?.draft_id;
