@@ -336,4 +336,21 @@ describe('掘金历史文章批量同步向导核心算法与缓存',()=>{
     classes.delete('is-spinning');
     expect(classes.has('is-spinning')).toBe(false);
   });
+
+  it('批量清空按钮样式规避宿主样式渗透，悬浮具备淡红背景与警示红字', async () => {
+    const fs = await import('node:fs');
+    const path = await import('node:path');
+    const css = fs.readFileSync(path.resolve(__dirname, '../src/juejin-content.css'), 'utf-8');
+    
+    // 检查 .jc-batch-clear-btn 具备透明背景与无下划线
+    expect(css).toMatch(/\.jc-batch-clear-btn\s*\{[^}]*background:\s*transparent/);
+    expect(css).toMatch(/\.jc-batch-clear-btn\s*\{[^}]*text-decoration:\s*none/);
+    
+    // 检查悬浮态包含浅红背景与警示红字
+    expect(css).toMatch(/\.jc-batch-clear-btn:hover\s*\{[^}]*background:\s*#ffece8/);
+    expect(css).toMatch(/\.jc-batch-clear-btn:hover\s*\{[^}]*color:\s*#f53f3f/);
+
+    // 检查深色主题配置
+    expect(css).toContain('body[data-theme="dark"] .jc-batch-clear-btn');
+  });
 });

@@ -1191,17 +1191,31 @@ body[data-theme="dark"] .jc-creator-sync[data-state="login"] {
 }
 
 .jc-batch-clear-btn {
-  background: none;
-  border: none;
-  color: #86909c;
-  font-size: 12px;
-  cursor: pointer;
-  text-decoration: underline;
-  padding: 0;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  background: transparent !important;
+  border: none !important;
+  color: #86909c !important;
+  font-size: 12px !important;
+  line-height: 20px !important;
+  padding: 1px 7px !important;
+  border-radius: 4px !important;
+  cursor: pointer !important;
+  text-decoration: none !important;
+  outline: none !important;
+  user-select: none !important;
+  transition: all 0.15s ease !important;
 }
 
 .jc-batch-clear-btn:hover {
-  color: #f53f3f;
+  background: #ffece8 !important;
+  color: #f53f3f !important;
+}
+
+.jc-batch-clear-btn:active {
+  background: #fcdbd5 !important;
+  color: #cb2626 !important;
 }
 
 .jc-batch-header-right {
@@ -1323,6 +1337,12 @@ body[data-theme="dark"] .jc-creator-sync[data-state="login"] {
   background: #e8f3ff;
   border-color: #bedaff;
   color: #1e80ff;
+}
+
+.jc-pill-btn.jc-pill-clear-btn:hover {
+  background: #ffece8;
+  border-color: #fecaca;
+  color: #f53f3f;
 }
 
 .jc-pill-btn svg {
@@ -1661,5 +1681,23 @@ body[data-theme="dark"] .jc-batch-log-list {
 body[data-theme="dark"] .jc-batch-article-item,
 body[data-theme="dark"] .jc-batch-log-item {
   border-color: #2c2c34;
+}
+
+body[data-theme="dark"] .jc-batch-clear-btn {
+  color: #86909c !important;
+  background: transparent !important;
+}
+body[data-theme="dark"] .jc-batch-clear-btn:hover {
+  background: rgba(245, 63, 63, 0.18) !important;
+  color: #f87171 !important;
+}
+body[data-theme="dark"] .jc-batch-clear-btn:active {
+  background: rgba(245, 63, 63, 0.28) !important;
+  color: #fca5a5 !important;
+}
+body[data-theme="dark"] .jc-pill-btn.jc-pill-clear-btn:hover {
+  background: rgba(245, 63, 63, 0.18) !important;
+  border-color: rgba(245, 63, 63, 0.3) !important;
+  color: #f87171 !important;
 }
 
