@@ -236,18 +236,45 @@ describe('掘金历史文章批量同步向导核心算法与缓存',()=>{
     expect(rawTemplate).toContain('jc-batch-select-all-checkbox');
   });
 
-  it('批量同步弹窗标题精炼为批量同步且包含标准平台列表容器', () => {
+  it('批量同步弹窗复用单篇同步弹窗的 Header、Footer 与按钮风格', () => {
     const modalTemplate = `
       <div class="jc-batch-modal-root">
         <div class="jc-batch-modal-backdrop"></div>
-        <div class="jc-batch-modal">
-          <h3 id="jc-batch-modal-title">批量同步</h3>
-          <div class="jc-platform-list jc-batch-platform-list" id="jc-batch-platform-grid"></div>
-        </div>
+        <section class="jc-sync-dialog jc-batch-modal" role="dialog" aria-modal="true" aria-labelledby="jc-sync-title" tabindex="-1">
+          <header class="jc-dialog-header">
+            <div class="jc-dialog-brand">
+              <h2 id="jc-sync-title">批量同步</h2>
+            </div>
+            <div class="jc-header-actions">
+              <button class="jc-btn-icon jc-auth-refresh" type="button" title="重新检测平台状态"></button>
+              <button class="jc-btn-icon jc-dialog-close" type="button" title="关闭弹窗"></button>
+            </div>
+          </header>
+          <div class="jc-dialog-body jc-batch-modal-body">
+            <div class="jc-platform-list jc-batch-platform-list" id="jc-batch-platform-grid"></div>
+            <div class="jc-sync-note jc-batch-estimate-card"></div>
+          </div>
+          <footer class="jc-dialog-footer jc-batch-modal-footer">
+            <div class="jc-footer-status" data-has-selected="true">
+              <span class="jc-status-dot"></span>
+              <span class="jc-selected-count">已选 2 篇文章 (4 个平台)</span>
+            </div>
+            <div class="jc-footer-buttons">
+              <button class="jc-dialog-cancel jc-batch-cancel-btn" type="button">取消</button>
+              <button class="jc-dialog-confirm jc-batch-start-btn" type="button">
+                <span class="jc-confirm-icon-wrap"></span>
+                <span class="jc-confirm-text">开始批量同步</span>
+              </button>
+            </div>
+          </footer>
+        </section>
       </div>
     `;
-    expect(modalTemplate).toContain('<h3 id="jc-batch-modal-title">批量同步</h3>');
-    expect(modalTemplate).toContain('jc-platform-list');
-    expect(modalTemplate).toContain('jc-batch-modal-backdrop');
+    expect(modalTemplate).toContain('jc-sync-dialog');
+    expect(modalTemplate).toContain('jc-auth-refresh');
+    expect(modalTemplate).toContain('jc-dialog-footer');
+    expect(modalTemplate).toContain('jc-footer-status');
+    expect(modalTemplate).toContain('jc-dialog-confirm');
+    expect(modalTemplate).toContain('jc-dialog-cancel');
   });
 });

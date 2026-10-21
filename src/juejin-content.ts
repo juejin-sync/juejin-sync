@@ -807,21 +807,26 @@ function openBatchSyncWizard(){
   let modalAuths:PlatformAuth[]=[];
 
   root.innerHTML=`<div class="jc-batch-modal-backdrop"></div>
-  <div class="jc-batch-modal" role="dialog" aria-modal="true" aria-labelledby="jc-batch-modal-title">
-    <div class="jc-batch-modal-header">
-      <div class="jc-batch-modal-title-row">
-        <img src="${chrome.runtime.getURL('logo.svg')}" width="28" height="28" alt="" aria-hidden="true" />
-        <div>
-          <h3 id="jc-batch-modal-title">批量同步</h3>
+  <section class="jc-sync-dialog jc-batch-modal" role="dialog" aria-modal="true" aria-labelledby="jc-sync-title" tabindex="-1">
+    <header class="jc-dialog-header">
+      <div class="jc-dialog-brand">
+        <img class="jc-dialog-emblem" src="${chrome.runtime.getURL('logo.svg')}" width="36" height="36" alt="" aria-hidden="true">
+        <div class="jc-dialog-titles">
+          <h2 id="jc-sync-title">批量同步</h2>
           <p>多选文章 · 多平台防风控限速分发</p>
         </div>
       </div>
-      <button class="jc-btn-icon jc-dialog-close" type="button" title="关闭弹窗" aria-label="关闭弹窗">
-        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
-      </button>
-    </div>
+      <div class="jc-header-actions">
+        <button class="jc-btn-icon jc-auth-refresh" type="button" title="重新检测平台状态" aria-label="重新检测平台状态">
+          <svg class="jc-refresh-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 11A8.1 8.1 0 0 0 4.5 9M4 5v4h4M4 13a8.1 8.1 0 0 0 15.5 2m.5 4v-4h-4"/></svg>
+        </button>
+        <button class="jc-btn-icon jc-dialog-close" type="button" title="关闭弹窗" aria-label="关闭弹窗">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
+        </button>
+      </div>
+    </header>
 
-    <div class="jc-batch-modal-body">
+    <div class="jc-dialog-body jc-batch-modal-body">
       <!-- 步骤指示器 -->
       <div class="jc-batch-steps">
         <div class="jc-batch-step is-active" data-step="1">
@@ -879,17 +884,15 @@ function openBatchSyncWizard(){
         </div>
 
         <!-- 3. 耗时预估与风控提示 -->
-        <div class="jc-batch-section">
-          <div class="jc-batch-estimate-card">
-            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
-            <div>
-              <div class="jc-estimate-summary">
-                已选 <b id="jc-est-articles">${selectedList.length}</b> 篇文章 × <b id="jc-est-platforms">${platformsSelected.size}</b> 个平台 = <b id="jc-est-tasks">${selectedList.length*platformsSelected.size}</b> 个同步任务，预计耗时约 <b id="jc-est-duration">${Math.max(3,Math.ceil((selectedList.length*platformsSelected.size/2)*2.5))}</b> 秒。
-              </div>
-              <div style="font-size:11.5px;color:#4e5969;margin-top:4px;">
-                🛡️ 已启用稳健防风控限速队列（并发上限 2，任务间注入 1.0~2.5s 动态随机抖动延迟，保障账号安全）。
-              </div>
+        <div class="jc-sync-note jc-batch-estimate-card">
+          <div class="jc-note-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
+          </div>
+          <div class="jc-note-content">
+            <div class="jc-estimate-summary">
+              <b>已选 <span id="jc-est-articles">${selectedList.length}</span> 篇文章 × <span id="jc-est-platforms">${platformsSelected.size}</span> 个平台 = <span id="jc-est-tasks">${selectedList.length*platformsSelected.size}</span> 个同步任务</b>，预计耗时约 <span id="jc-est-duration">${Math.max(3,Math.ceil((selectedList.length*platformsSelected.size/2)*2.5))}</span> 秒。
             </div>
+            <span>🛡️ 已启用稳健防风控限速队列（并发上限 2，任务间注入 1.0~2.5s 动态随机抖动延迟，保障账号安全）。</span>
           </div>
         </div>
       </div>
@@ -922,13 +925,20 @@ function openBatchSyncWizard(){
       </div>
     </div>
 
-    <div class="jc-batch-modal-footer">
-      <button type="button" class="jc-dialog-secondary-btn jc-batch-cancel-btn">取消</button>
-      <button type="button" class="jc-dialog-confirm-btn jc-batch-start-btn" ${selectedList.length===0||platformsSelected.size===0?'disabled':''}>
-        <span>开始批量同步 🚀</span>
-      </button>
-    </div>
-  </div>`;
+    <footer class="jc-dialog-footer jc-batch-modal-footer">
+      <div class="jc-footer-status" data-has-selected="true">
+        <span class="jc-status-dot"></span>
+        <span class="jc-selected-count">已选 ${selectedList.length} 篇文章 (${platformsSelected.size} 个平台)</span>
+      </div>
+      <div class="jc-footer-buttons">
+        <button class="jc-dialog-cancel jc-batch-cancel-btn" type="button">取消</button>
+        <button class="jc-dialog-confirm jc-batch-start-btn" type="button" ${selectedList.length===0||platformsSelected.size===0?'disabled':''}>
+          <span class="jc-confirm-icon-wrap">${SYNC_ICON}</span>
+          <span class="jc-confirm-text">开始批量同步</span>
+        </button>
+      </div>
+    </footer>
+  </section>`;
 
   document.body.appendChild(root);
 
@@ -963,8 +973,22 @@ function openBatchSyncWizard(){
     const estDurationEl=root.querySelector('#jc-est-duration');
     if(estDurationEl)estDurationEl.textContent=String(estDuration);
 
+    const hasSelected=articlesCount>0&&platformsCount>0;
     const startBtn=root.querySelector<HTMLButtonElement>('.jc-batch-start-btn');
-    if(startBtn)startBtn.disabled=articlesCount===0||platformsCount===0;
+    if(startBtn)startBtn.disabled=!hasSelected;
+
+    const footerStatus=root.querySelector<HTMLElement>('.jc-footer-status');
+    const selectedCount=root.querySelector<HTMLElement>('.jc-selected-count');
+    if(footerStatus)footerStatus.dataset.hasSelected=hasSelected?'true':'false';
+    if(selectedCount){
+      if(articlesCount===0){
+        selectedCount.textContent='请在列表勾选要同步的文章';
+      }else if(platformsCount===0){
+        selectedCount.textContent='请勾选要同步的目标平台';
+      }else{
+        selectedCount.textContent=`已选 ${articlesCount} 篇文章 (${platformsCount} 个平台)`;
+      }
+    }
   };
 
   // 绑定清单移除事件
@@ -1021,6 +1045,16 @@ function openBatchSyncWizard(){
   };
   void refreshPlatformCards();
 
+  const refreshButton=root.querySelector<HTMLButtonElement>('.jc-auth-refresh');
+  refreshButton?.addEventListener('click',async()=>{
+    if(refreshButton.disabled)return;
+    refreshButton.disabled=true;
+    refreshButton.classList.add('is-refreshing');
+    await refreshPlatformCards();
+    refreshButton.classList.remove('is-refreshing');
+    refreshButton.disabled=false;
+  });
+
   // 启动批量同步
   const startBtn=root.querySelector<HTMLButtonElement>('.jc-batch-start-btn');
   startBtn?.addEventListener('click',async()=>{
@@ -1029,7 +1063,7 @@ function openBatchSyncWizard(){
     // 切换到执行看板视图
     const configView=root.querySelector<HTMLElement>('.jc-batch-view-config');
     const execView=root.querySelector<HTMLElement>('.jc-batch-view-exec');
-    const footer=root.querySelector<HTMLElement>('.jc-batch-modal-footer');
+    const footer=root.querySelector<HTMLElement>('.jc-dialog-footer');
     if(configView)configView.style.display='none';
     if(execView)execView.style.display='block';
     if(footer)footer.style.display='none';
