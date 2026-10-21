@@ -62,6 +62,7 @@ function teardownContentScript(){
   }
   document.querySelector('.jc-sync-dialog-root')?.remove();
   document.querySelector('.jc-batch-modal-root')?.remove();
+  document.querySelector('.jc-batch-dock')?.remove();
   document.querySelector('.jc-batch-action-bar')?.remove();
 }
 
@@ -626,20 +627,34 @@ function injectHistoryMenus(){
 }
 
 function updateBatchActionBarState(){
-  const bar=document.querySelector<HTMLElement>('.jc-batch-action-bar');
-  if(!bar)return;
-  const countSpan=bar.querySelector<HTMLElement>('.jc-count-number');
+  const dock=document.querySelector<HTMLElement>('.jc-batch-dock,.jc-batch-action-bar');
+  if(!dock)return;
+  const countSpan=dock.querySelector<HTMLElement>('.jc-count-number');
   if(countSpan)countSpan.textContent=String(selectedArticles.size);
-  const triggerBtn=bar.querySelector<HTMLButtonElement>('.jc-batch-trigger-btn');
+
+  const badge=dock.querySelector<HTMLElement>('.jc-dock-badge');
+  if(badge){
+    badge.classList.toggle('has-selected',selectedArticles.size>0);
+  }
+
+  const triggerBtn=dock.querySelector<HTMLButtonElement>('.jc-batch-trigger-btn');
   if(triggerBtn){
     triggerBtn.disabled=selectedArticles.size===0;
   }
-  const selectAllCheckbox=bar.querySelector<HTMLInputElement>('.jc-batch-select-all-checkbox');
+
+  const clearBtn=dock.querySelector<HTMLButtonElement>('.jc-batch-clear-btn');
+  if(clearBtn){
+    clearBtn.disabled=selectedArticles.size===0;
+  }
+
+  const selectAllBtn=dock.querySelector<HTMLElement>('.jc-batch-select-all-btn');
   const allRowCheckboxes=document.querySelectorAll<HTMLInputElement>('.jc-article-select-checkbox');
-  if(selectAllCheckbox&&allRowCheckboxes.length>0){
+  if(selectAllBtn&&allRowCheckboxes.length>0){
     const checkedCount=[...allRowCheckboxes].filter(cb=>cb.checked).length;
-    selectAllCheckbox.checked=checkedCount===allRowCheckboxes.length;
-    selectAllCheckbox.indeterminate=checkedCount>0&&checkedCount<allRowCheckboxes.length;
+    const isAll=checkedCount===allRowCheckboxes.length;
+    const textSpan=selectAllBtn.querySelector('.jc-dock-action-text');
+    if(textSpan)textSpan.textContent=isAll?'取消全选':'全选当前页';
+    selectAllBtn.classList.toggle('is-all-selected',isAll);
   }
 }
 
@@ -666,37 +681,61 @@ async function filterUnsyncedArticles(){
   updateBatchActionBarState();
 }
 
-function injectBatchActionBar(container:HTMLElement){
-  if(document.querySelector('.jc-batch-action-bar'))return;
-  const bar=document.createElement('div');
-  bar.className='jc-batch-action-bar';
-  bar.innerHTML=`<div class="jc-batch-bar-left">
-    <label class="jc-batch-select-all-label">
-      <input type="checkbox" class="jc-batch-select-all-checkbox" />
-      <span>全选当前页</span>
-    </label>
-    <button type="button" class="jc-batch-filter-unsynced-btn" title="根据同步历史，自动勾选未同步过目标平台的文章">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>
-      <span>一键勾选未同步文章</span>
-    </button>
-    <span class="jc-batch-selected-count">已选 <b class="jc-count-number">${selectedArticles.size}</b> 篇</span>
-  </div>
-  <div class="jc-batch-bar-right">
-    <button type="button" class="jc-batch-trigger-btn" ${selectedArticles.size===0?'disabled':''}>
-      <span>批量同步向导</span>
-      <span class="jc-batch-rocket-icon">🚀</span>
-    </button>
-  </div>`;
+function injectBatchDock(){
+  if(document.querySelector('.jc-batch-dock'))return;
+  const dock=document.createElement('div');
+  dock.className='jc-batch-dock jc-batch-action-bar';
+  dock.setAttribute('role','toolbar');
+  dock.setAttribute('aria-label','历史文章批量同步舱');
+  dock.innerHTML=`
+    <div class="jc-dock-header">
+      <div class="jc-dock-brand">
+        <span class="jc-dock-logo-wrap"><img src="${chrome.runtime.getURL('logo.svg')}" width="16" height="16" alt="" aria-hidden="true" /></span>
+        <span class="jc-dock-title">批量同步</span>
+      </div>
+      <span class="jc-dock-badge" title="当前已勾选文章数"><b class="jc-count-number">${selectedArticles.size}</b> 篇</span>
+    </div>
 
-  const selectAllCb=bar.querySelector<HTMLInputElement>('.jc-batch-select-all-checkbox');
-  selectAllCb?.addEventListener('change',()=>{
-    const checked=selectAllCb.checked;
-    const checkboxes=document.querySelectorAll<HTMLInputElement>('.jc-article-select-checkbox');
-    checkboxes.forEach(cb=>{
-      cb.checked=checked;
+    <button type="button" class="jc-dock-primary-btn jc-batch-trigger-btn" ${selectedArticles.size===0?'disabled':''} title="选择文章后打开批量同步向导">
+      <span class="jc-dock-rocket">🚀</span>
+      <span class="jc-dock-btn-text">开始同步</span>
+    </button>
+
+    <div class="jc-dock-divider"></div>
+
+    <div class="jc-dock-actions">
+      <button type="button" class="jc-dock-action-btn jc-batch-select-all-btn" title="全选或反选当前页所有文章">
+        <svg class="jc-dock-btn-svg" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="2" width="12" height="12" rx="3"/><polyline points="5 8 7.5 10.5 11.5 5.5"/></svg>
+        <span class="jc-dock-action-text">全选当前页</span>
+      </button>
+
+      <button type="button" class="jc-dock-action-btn jc-batch-filter-unsynced-btn" title="根据同步历史，一键勾选未同步目标平台的文章">
+        <svg class="jc-dock-btn-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>
+        <span class="jc-dock-action-text">勾选未同步</span>
+      </button>
+
+      <button type="button" class="jc-dock-action-btn jc-batch-clear-btn" ${selectedArticles.size===0?'disabled':''} title="清空所有已勾选的文章">
+        <svg class="jc-dock-btn-svg" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="12" y1="4" x2="4" y2="12"/><line x1="4" y1="4" x2="12" y2="12"/></svg>
+        <span class="jc-dock-action-text">清空已选</span>
+      </button>
+    </div>
+
+    <button type="button" class="jc-dock-toggle-btn" title="收起 / 展开操作舱" aria-label="收起或展开操作舱">
+      <svg class="jc-dock-toggle-svg" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 12 10 8 6 4"/></svg>
+    </button>
+  `;
+
+  // 1. 全选 / 反选
+  dock.querySelector('.jc-batch-select-all-btn')?.addEventListener('click',()=>{
+    const allRowCheckboxes=document.querySelectorAll<HTMLInputElement>('.jc-article-select-checkbox');
+    if(allRowCheckboxes.length===0)return;
+    const checkedCount=[...allRowCheckboxes].filter(cb=>cb.checked).length;
+    const shouldSelectAll=checkedCount<allRowCheckboxes.length;
+    allRowCheckboxes.forEach(cb=>{
+      cb.checked=shouldSelectAll;
       const articleId=cb.dataset.articleId||'';
       const title=cb.dataset.title||'';
-      if(checked){
+      if(shouldSelectAll){
         if(articleId)selectedArticles.set(articleId,{articleId,title});
       }else{
         if(articleId)selectedArticles.delete(articleId);
@@ -705,17 +744,35 @@ function injectBatchActionBar(container:HTMLElement){
     updateBatchActionBarState();
   });
 
-  bar.querySelector('.jc-batch-filter-unsynced-btn')?.addEventListener('click',()=>{
+  // 2. 勾选未同步
+  dock.querySelector('.jc-batch-filter-unsynced-btn')?.addEventListener('click',()=>{
     void filterUnsyncedArticles();
   });
 
-  bar.querySelector('.jc-batch-trigger-btn')?.addEventListener('click',()=>{
+  // 3. 清空已选
+  dock.querySelector('.jc-batch-clear-btn')?.addEventListener('click',()=>{
+    const allRowCheckboxes=document.querySelectorAll<HTMLInputElement>('.jc-article-select-checkbox');
+    allRowCheckboxes.forEach(cb=>{
+      cb.checked=false;
+    });
+    selectedArticles.clear();
+    updateBatchActionBarState();
+  });
+
+  // 4. 触发批量向导
+  dock.querySelector('.jc-batch-trigger-btn')?.addEventListener('click',()=>{
     if(selectedArticles.size>0){
       openBatchSyncWizard();
     }
   });
 
-  container.parentElement?.insertBefore(bar,container);
+  // 5. 折叠 / 展开
+  const toggleBtn=dock.querySelector<HTMLButtonElement>('.jc-dock-toggle-btn');
+  toggleBtn?.addEventListener('click',()=>{
+    dock.classList.toggle('is-collapsed');
+  });
+
+  document.body.appendChild(dock);
 }
 
 function openBatchSyncWizard(){
@@ -1119,27 +1176,39 @@ function injectCreatorCenterSync(){
 
     if(!firstRow&&row)firstRow=row;
 
-    // 1. 注入行级 Checkbox
+    // 1. 注入行级 Checkbox (弹性单行水平垂直对齐，杜绝断行)
     const containerCell=link.parentElement;
-    if(containerCell&&!containerCell.querySelector(`.jc-article-select-checkbox[data-article-id="${articleId}"]`)){
-      const wrap=document.createElement('div');
-      wrap.className='jc-article-select-wrap';
-      const checkbox=document.createElement('input');
-      checkbox.type='checkbox';
-      checkbox.className='jc-article-select-checkbox';
-      checkbox.dataset.articleId=articleId;
-      checkbox.dataset.title=title;
-      checkbox.checked=selectedArticles.has(articleId);
-      checkbox.addEventListener('change',()=>{
-        if(checkbox.checked){
-          selectedArticles.set(articleId,{articleId,title});
-        }else{
-          selectedArticles.delete(articleId);
+    if(containerCell){
+      const existingCheckbox=containerCell.querySelector<HTMLInputElement>(`.jc-article-select-checkbox[data-article-id="${articleId}"]`);
+      if(!existingCheckbox){
+        let titleRow=link.closest<HTMLElement>('.jc-title-flex-row');
+        if(!titleRow){
+          titleRow=document.createElement('div');
+          titleRow.className='jc-title-flex-row';
+          containerCell.insertBefore(titleRow,link);
+          titleRow.appendChild(link);
         }
-        updateBatchActionBarState();
-      });
-      wrap.appendChild(checkbox);
-      containerCell.insertBefore(wrap,link);
+        const wrap=document.createElement('div');
+        wrap.className='jc-article-select-wrap';
+        const checkbox=document.createElement('input');
+        checkbox.type='checkbox';
+        checkbox.className='jc-article-select-checkbox';
+        checkbox.dataset.articleId=articleId;
+        checkbox.dataset.title=title;
+        checkbox.checked=selectedArticles.has(articleId);
+        checkbox.addEventListener('change',()=>{
+          if(checkbox.checked){
+            selectedArticles.set(articleId,{articleId,title});
+          }else{
+            selectedArticles.delete(articleId);
+          }
+          updateBatchActionBarState();
+        });
+        wrap.appendChild(checkbox);
+        titleRow.insertBefore(wrap,link);
+      }else{
+        existingCheckbox.checked=selectedArticles.has(articleId);
+      }
     }
 
     // 2. 注入单篇“同步多平台”按钮
@@ -1157,12 +1226,8 @@ function injectCreatorCenterSync(){
     }
   });
 
-  // 3. 注入顶部浮动操作条
-  const targetRow=firstRow as HTMLElement|null;
-  if(targetRow){
-    const listParent=targetRow.parentElement;
-    if(listParent)injectBatchActionBar(listParent);
-  }
+  // 3. 注入右侧竖向浮动操作舱
+  injectBatchDock();
   updateBatchActionBarState();
 }
 

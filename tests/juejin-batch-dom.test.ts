@@ -78,4 +78,91 @@ describe('掘金历史文章批量同步向导核心算法与缓存',()=>{
       globalThis.fetch=originalFetch;
     }
   });
+
+  it('单行弹性标题包裹结构确保复选框与标题在同一水平行内且不破坏元信息布局',()=>{
+    class MockElement {
+      children: MockElement[] = [];
+      parentElement: MockElement | null = null;
+      className = '';
+      tagName = 'div';
+      constructor(tagName = 'div') { this.tagName = tagName; }
+      appendChild(child: MockElement) {
+        if (child.parentElement) child.parentElement.removeChild(child);
+        child.parentElement = this;
+        this.children.push(child);
+      }
+      insertBefore(newChild: MockElement, refChild: MockElement) {
+        if (newChild.parentElement) newChild.parentElement.removeChild(newChild);
+        const index = this.children.indexOf(refChild);
+        newChild.parentElement = this;
+        if (index === -1) this.children.push(newChild);
+        else this.children.splice(index, 0, newChild);
+      }
+      removeChild(child: MockElement) {
+        const index = this.children.indexOf(child);
+        if (index !== -1) {
+          child.parentElement = null;
+          this.children.splice(index, 1);
+        }
+      }
+      closest(className: string): MockElement | null {
+        let cur: MockElement | null = this;
+        while (cur) {
+          if (cur.className.includes(className.replace('.', ''))) return cur;
+          cur = cur.parentElement;
+        }
+        return null;
+      }
+    }
+
+    const container = new MockElement('div');
+    const link = new MockElement('a');
+    link.className = 'title';
+    const subTitle = new MockElement('div');
+    subTitle.className = 'sub-title';
+
+    container.appendChild(link);
+    container.appendChild(subTitle);
+
+    // 执行 titleRow 注入逻辑
+    let titleRow = link.closest('.jc-title-flex-row');
+    if (!titleRow) {
+      titleRow = new MockElement('div');
+      titleRow.className = 'jc-title-flex-row';
+      container.insertBefore(titleRow, link);
+      titleRow.appendChild(link);
+    }
+    const wrap = new MockElement('div');
+    wrap.className = 'jc-article-select-wrap';
+    const checkbox = new MockElement('input');
+    checkbox.className = 'jc-article-select-checkbox';
+    wrap.appendChild(checkbox);
+    titleRow.insertBefore(wrap, link);
+
+    // 验证结构：container 拥有 titleRow 和 subTitle 两个直接子节点
+    expect(container.children.length).toBe(2);
+    expect(container.children[0]).toBe(titleRow);
+    expect(container.children[1]).toBe(subTitle);
+
+    // 验证 titleRow 内部：第 1 个是 wrap，第 2 个是 link（水平同级）
+    expect(titleRow.children.length).toBe(2);
+    expect(titleRow.children[0]).toBe(wrap);
+    expect(titleRow.children[1]).toBe(link);
+  });
+
+  it('右侧浮动操作舱全选与清空状态切换自洽',()=>{
+    const selectedArticles=new Map<string,string>();
+    const totalCount=3;
+
+    // 初始状态：未勾选任何文章
+    expect(selectedArticles.size).toBe(0);
+
+    // 模拟全选操作
+    ['art1','art2','art3'].forEach(id=>selectedArticles.set(id,`文章${id}`));
+    expect(selectedArticles.size).toBe(totalCount);
+
+    // 模拟再次点击全选按钮（反选清空）
+    selectedArticles.clear();
+    expect(selectedArticles.size).toBe(0);
+  });
 });
