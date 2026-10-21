@@ -1,4 +1,8 @@
 // 同步流程的通用异步控制：提供有限并发和带退避的失败重试。
+export function sleep(ms:number):Promise<void>{
+  return new Promise(resolve=>setTimeout(resolve,ms));
+}
+
 export async function retry<T>(operation:()=>Promise<T>,attempts=3,baseDelay=300):Promise<T>{
   let lastError:unknown;
   for(let attempt=1;attempt<=attempts;attempt++){

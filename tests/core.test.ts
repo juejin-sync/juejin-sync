@@ -508,6 +508,37 @@ describe('v0.6.0 体验深化',()=>{
     expect(JSON.parse(bodies[1])).toMatchObject({is_new:1});
     expect(JSON.parse(bodies[1]).id).toBeUndefined();
   });
+
+  it('CSDN 400 频控「文章频繁发布」触发自动退避并在重试成功后返回',async()=>{
+    let attempts=0;
+    vi.stubGlobal('fetch',vi.fn(async(input:RequestInfo|URL)=>{
+      const url=String(input);
+      if(url.includes('getBaseInfo'))return new Response(JSON.stringify({code:200,data:{name:'tester'}}),{status:200});
+      attempts++;
+      if(attempts===1){
+        return new Response(JSON.stringify({code:400,msg:'文章频繁发布，请稍后再试'}),{status:400});
+      }
+      return new Response(JSON.stringify({code:200,data:{id:'rate-ok-1',url:'https://editor.csdn.net/md/?articleId=rate-ok-1'}}),{status:200});
+    }));
+    const result=await saveDraftViaApi(
+      {...article,title:'足够长的同步标题',markdown:'这是长度超过二十个字符的完整正文内容，用于验证频控重试流程。'},
+      {rateLimitDelayMs:0}
+    );
+    expect(result).toMatchObject({articleId:'rate-ok-1'});
+    expect(attempts).toBe(2);
+  });
+
+  it('CSDN 400 频控重试后仍失败时精准归类为 rate-limit 而非 platform-change',async()=>{
+    vi.stubGlobal('fetch',vi.fn(async(input:RequestInfo|URL)=>{
+      const url=String(input);
+      if(url.includes('getBaseInfo'))return new Response(JSON.stringify({code:200,data:{name:'tester'}}),{status:200});
+      return new Response(JSON.stringify({code:400,msg:'文章频繁发布，请稍后再试'}),{status:400});
+    }));
+    await expect(saveDraftViaApi(
+      {...article,title:'足够长的同步标题',markdown:'这是长度超过二十个字符的完整正文内容，用于验证频控错误分类。'},
+      {rateLimitDelayMs:0}
+    )).rejects.toMatchObject({category:'rate-limit',message:expect.stringContaining('CSDN 发文过于频繁')});
+  });
 });
 
 describe('掘金发布成功观察',()=>{

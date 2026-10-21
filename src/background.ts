@@ -1,5 +1,5 @@
 // 扩展后台协调器：管理多平台登录状态、同步任务和草稿写入。
-import {Semaphore} from './core/async';
+import {Semaphore,sleep} from './core/async';
 import {allTasks,clearAllTasks,deleteTask,finishSavedTask,getArticleDraftMapping,getSettings,migrateStoredTasks,patchTask,preserveTaskMappings,putTask,removeArticleDraftMapping,saveArticleDraftMapping,saveSettings,saveTasks} from './core/store';
 import {canDeleteTask,extractCsdnArticleId,extractZhihuArticleId,findMatchingTask,isActiveTask,isInterruptedTask,isRetryableTask,isUncertainCreateTask,targetArticleId} from './core/task';
 import {SyncError,classifySyncError} from './core/diagnostic';
@@ -20,6 +20,29 @@ import {uid} from './types';
 const runningTasks=new Set<string>();
 /** 全局任务闸门：同一时间最多 2 篇文章在同步，批量重试自动排队，避免触发平台限流。 */
 const taskGate=new Semaphore(2);
+/**
+ * 平台级单并发串行互斥闸门与防风控冷却：
+ * 批量同步多篇文章至同一平台时，避免同一时间打在同一接口上触发频控，并强制保证两次调用间隔。
+ */
+const platformGates:Record<PlatformId,Semaphore>={
+  csdn:new Semaphore(1),
+  wechat:new Semaphore(1),
+  cnblogs:new Semaphore(1),
+  zhihu:new Semaphore(1)
+};
+const platformLastSave:Record<PlatformId,number>={
+  csdn:0,
+  wechat:0,
+  cnblogs:0,
+  zhihu:0
+};
+const isTestEnv=(globalThis as unknown as {process?:{env?:{NODE_ENV?:string}}}).process?.env?.NODE_ENV==='test';
+const PLATFORM_COOLDOWN_MS:Record<PlatformId,number>={
+  csdn:isTestEnv?0:3000,
+  wechat:0,
+  cnblogs:0,
+  zhihu:0
+};
 const JUEJIN_UUID_KEY='juejinUuid';
 
 async function getJuejinUuid(){return((await chrome.storage.local.get(JUEJIN_UUID_KEY))[JUEJIN_UUID_KEY] as string|undefined)||'';}
@@ -142,35 +165,46 @@ async function runTask(task:SyncTask){
       onProgress:async(progress:SyncTask['progress'])=>{stage='images';if(progress)await patchTask(task.id,{status:'transforming',progress});},
       onSaving:async()=>{stage='draft';await patchTask(task.id,{status:'writing',progress:{current:1,total:1,message:isUpdate()?`正在更新${platformName}草稿`:`正在创建${platformName}草稿`}});}
     };
-    const result=task.platform==='wechat'?await saveWechatDraft(transformed,{...callbacks,appMsgId:task.wechatAppMsgId,accountId:task.wechatAccountId,theme:settings.wechatCodeTheme}):task.platform==='cnblogs'?await saveCnblogsDraft(transformed,{
-      ...callbacks,
-      postId:cnblogsPostId,
-      expectedAccountId:task.cnblogsAccountId,
-      appendSourceLink:settings.appendSourceLink,
-      syncCover:settings.syncCover,
-      autoSummary:settings.autoSummary
-    }):task.platform==='zhihu'?await saveZhihuDraft(transformed,{
-      ...callbacks,
-      articleId:zhihuArticleId,
-      expectedAccountId:task.zhihuAccountId,
-      appendSourceLink:settings.appendSourceLink,
-      syncCover:settings.syncCover,
-      onDraftCreated:async(createdId:string,createdUrl:string)=>{
-        zhihuArticleId=createdId;
-        await patchTask(task.id,{zhihuArticleId:createdId,draftUrl:createdUrl});
-        await saveArticleDraftMapping(task.article,createdId,createdUrl,'zhihu',task.zhihuAccountId);
+    const result=await platformGates[task.platform].run(async()=>{
+      const cooldown=PLATFORM_COOLDOWN_MS[task.platform]||0;
+      const elapsed=Date.now()-(platformLastSave[task.platform]||0);
+      if(elapsed<cooldown){
+        await sleep(cooldown-elapsed);
       }
-    }):await saveDraftViaApi(transformed,{
-      articleId:csdnArticleId,
-      categories:resolveCsdnCategories(transformed.tags,settings),
-      syncCover:settings.syncCover,
-      autoSummary:settings.autoSummary,
-      appendSourceLink:settings.appendSourceLink,
-      imageFailurePolicy:settings.imageFailurePolicy,
-      onPreparing:callbacks.onPreparing,
-      onProgress:callbacks.onProgress,
-      onSaving:callbacks.onSaving,
-      onDowngradeToCreate:clearCsdnTarget
+      try{
+        return task.platform==='wechat'?await saveWechatDraft(transformed,{...callbacks,appMsgId:task.wechatAppMsgId,accountId:task.wechatAccountId,theme:settings.wechatCodeTheme}):task.platform==='cnblogs'?await saveCnblogsDraft(transformed,{
+          ...callbacks,
+          postId:cnblogsPostId,
+          expectedAccountId:task.cnblogsAccountId,
+          appendSourceLink:settings.appendSourceLink,
+          syncCover:settings.syncCover,
+          autoSummary:settings.autoSummary
+        }):task.platform==='zhihu'?await saveZhihuDraft(transformed,{
+          ...callbacks,
+          articleId:zhihuArticleId,
+          expectedAccountId:task.zhihuAccountId,
+          appendSourceLink:settings.appendSourceLink,
+          syncCover:settings.syncCover,
+          onDraftCreated:async(createdId:string,createdUrl:string)=>{
+            zhihuArticleId=createdId;
+            await patchTask(task.id,{zhihuArticleId:createdId,draftUrl:createdUrl});
+            await saveArticleDraftMapping(task.article,createdId,createdUrl,'zhihu',task.zhihuAccountId);
+          }
+        }):await saveDraftViaApi(transformed,{
+          articleId:csdnArticleId,
+          categories:resolveCsdnCategories(transformed.tags,settings),
+          syncCover:settings.syncCover,
+          autoSummary:settings.autoSummary,
+          appendSourceLink:settings.appendSourceLink,
+          imageFailurePolicy:settings.imageFailurePolicy,
+          onPreparing:callbacks.onPreparing,
+          onProgress:callbacks.onProgress,
+          onSaving:callbacks.onSaving,
+          onDowngradeToCreate:clearCsdnTarget
+        });
+      }finally{
+        platformLastSave[task.platform]=Date.now();
+      }
     });
     savedResult=result;
     const targetPatch=task.platform==='wechat'?{wechatAppMsgId:result.articleId}:task.platform==='cnblogs'?{cnblogsPostId:result.articleId}:task.platform==='zhihu'?{zhihuArticleId:result.articleId}:{csdnArticleId:result.articleId};

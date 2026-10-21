@@ -803,8 +803,17 @@ function openBatchSyncWizard(){
   root.className='jc-batch-modal-root';
 
   const selectedList=[...selectedArticles.values()];
-  const platformsSelected=new Set<PlatformId>(['csdn','wechat','cnblogs','zhihu']);
-  let modalAuths:PlatformAuth[]=[];
+  const platformsSelected=new Set<PlatformId>();
+  const userDeselected=new Set<PlatformId>();
+  let modalAuths:PlatformAuth[]=(['csdn','wechat','cnblogs','zhihu'] as PlatformId[]).map(p=>({
+    platform:p,
+    name:PLATFORM_META[p].name,
+    ok:true,
+    loggedIn:false,
+    loading:true
+  }));
+  let initialized=false;
+  let refreshing=false;
 
   root.innerHTML=`<div class="jc-batch-modal-backdrop"></div>
   <section class="jc-sync-dialog jc-batch-modal" role="dialog" aria-modal="true" aria-labelledby="jc-sync-title" tabindex="-1">
@@ -869,14 +878,14 @@ function openBatchSyncWizard(){
           </div>
           <div class="jc-platform-list jc-batch-platform-list" id="jc-batch-platform-grid">
             ${(['csdn','wechat','cnblogs','zhihu'] as PlatformId[]).map(p=>`
-              <div class="jc-platform-card is-selected is-loading" data-platform="${p}">
+              <div class="jc-platform-card is-loading" data-platform="${p}">
                 <div class="jc-card-logo"><img src="${PLATFORM_META[p].logo}" alt="" class="jc-logo-img" /></div>
                 <div class="jc-card-content">
                   <div class="jc-card-header-row"><b class="jc-card-title">${PLATFORM_META[p].name}</b><span class="jc-card-badge">${PLATFORM_META[p].badge}</span></div>
                   <div class="jc-card-meta-row"><span class="jc-card-status is-checking"><span class="jc-status-spinner"></span><span>检测登录状态…</span></span></div>
                 </div>
                 <div class="jc-card-control">
-                  <div class="jc-custom-checkbox is-checked"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><polyline points="3 8.5 6.5 12 13 4" /></svg></div>
+                  <span class="jc-action-skeleton"></span>
                 </div>
               </div>
             `).join('')}
@@ -890,9 +899,9 @@ function openBatchSyncWizard(){
           </div>
           <div class="jc-note-content">
             <div class="jc-estimate-summary">
-              <b>已选 <span id="jc-est-articles">${selectedList.length}</span> 篇文章 × <span id="jc-est-platforms">${platformsSelected.size}</span> 个平台 = <span id="jc-est-tasks">${selectedList.length*platformsSelected.size}</span> 个同步任务</b>，预计耗时约 <span id="jc-est-duration">${Math.max(3,Math.ceil((selectedList.length*platformsSelected.size/2)*2.5))}</span> 秒。
+              <b>已选 <span id="jc-est-articles">${selectedList.length}</span> 篇文章 × <span id="jc-est-platforms">0</span> 个平台 = <span id="jc-est-tasks">0</span> 个同步任务</b>，预计耗时约 <span id="jc-est-duration">3</span> 秒。
             </div>
-            <span>🛡️ 已启用稳健防风控限速队列（并发上限 2，任务间注入 1.0~2.5s 动态随机抖动延迟，保障账号安全）。</span>
+            <span>🛡️ 已启用稳健防风控限速队列（单平台并发隔离与冷却，任务间注入 1.0~2.5s 动态随机抖动延迟，保障账号安全）。</span>
           </div>
         </div>
       </div>
@@ -926,13 +935,13 @@ function openBatchSyncWizard(){
     </div>
 
     <footer class="jc-dialog-footer jc-batch-modal-footer">
-      <div class="jc-footer-status" data-has-selected="true">
+      <div class="jc-footer-status" data-has-selected="false">
         <span class="jc-status-dot"></span>
-        <span class="jc-selected-count">已选 ${selectedList.length} 篇文章 (${platformsSelected.size} 个平台)</span>
+        <span class="jc-selected-count">正在检测平台状态…</span>
       </div>
       <div class="jc-footer-buttons">
         <button class="jc-dialog-cancel jc-batch-cancel-btn" type="button">取消</button>
-        <button class="jc-dialog-confirm jc-batch-start-btn" type="button" ${selectedList.length===0||platformsSelected.size===0?'disabled':''}>
+        <button class="jc-dialog-confirm jc-batch-start-btn" type="button" disabled>
           <span class="jc-confirm-icon-wrap">${SYNC_ICON}</span>
           <span class="jc-confirm-text">开始批量同步</span>
         </button>
@@ -951,6 +960,7 @@ function openBatchSyncWizard(){
         currentBatchQueue=null;
       }
     }
+    currentDialogRefresh=null;
     root.remove();
   };
 
@@ -960,7 +970,12 @@ function openBatchSyncWizard(){
 
   const updateEstimate=()=>{
     const articlesCount=selectedList.length;
-    const platformsCount=platformsSelected.size;
+    // 严格过滤仅保留已登录且用户勾选的平台
+    const validPlatforms=[...platformsSelected].filter(p=>{
+      const auth=modalAuths.find(a=>a.platform===p);
+      return auth&&auth.loggedIn===true;
+    });
+    const platformsCount=validPlatforms.length;
     const taskCount=articlesCount*platformsCount;
     const estDuration=Math.max(3,Math.ceil((taskCount/2)*2.5));
 
@@ -975,18 +990,21 @@ function openBatchSyncWizard(){
 
     const hasSelected=articlesCount>0&&platformsCount>0;
     const startBtn=root.querySelector<HTMLButtonElement>('.jc-batch-start-btn');
-    if(startBtn)startBtn.disabled=!hasSelected;
+    if(startBtn)startBtn.disabled=!hasSelected||refreshing;
 
     const footerStatus=root.querySelector<HTMLElement>('.jc-footer-status');
     const selectedCount=root.querySelector<HTMLElement>('.jc-selected-count');
     if(footerStatus)footerStatus.dataset.hasSelected=hasSelected?'true':'false';
     if(selectedCount){
-      if(articlesCount===0){
+      if(refreshing&&!initialized){
+        selectedCount.textContent='正在检测平台状态…';
+      }else if(articlesCount===0){
         selectedCount.textContent='请在列表勾选要同步的文章';
       }else if(platformsCount===0){
-        selectedCount.textContent='请勾选要同步的目标平台';
+        selectedCount.textContent='请勾选要同步的目标平台（未登录需先登录）';
       }else{
-        selectedCount.textContent=`已选 ${articlesCount} 篇文章 (${platformsCount} 个平台)`;
+        const names=validPlatforms.map(p=>PLATFORM_META[p].name).join('、');
+        selectedCount.textContent=`已选 ${articlesCount} 篇文章 (${platformsCount} 个平台: ${names})`;
       }
     }
   };
@@ -1010,55 +1028,120 @@ function openBatchSyncWizard(){
     });
   });
 
+  const renderPlatformCards=()=>{
+    const grid=root.querySelector('#jc-batch-platform-grid');
+    if(!grid)return;
+    grid.innerHTML=modalAuths.map(auth=>{
+      const isSelected=Boolean(auth.loggedIn&&platformsSelected.has(auth.platform));
+      return platformCard(auth,isSelected);
+    }).join('');
+
+    // 绑定平台卡片点击切换与去登录
+    grid.querySelectorAll<HTMLElement>('.jc-platform-card').forEach(card=>{
+      const platform=card.dataset.platform as PlatformId;
+      const auth=modalAuths.find(a=>a.platform===platform);
+      card.addEventListener('click',async event=>{
+        const target=event.target as HTMLElement;
+        if(refreshing||!auth||auth.loading)return;
+
+        if(!auth.loggedIn||target.closest('.jc-login-action-btn')){
+          event.preventDefault();
+          if(!isExtensionAlive()){
+            teardownContentScript();
+            alert('扩展已重新加载或更新，请刷新网页后再试。');
+            return;
+          }
+          await safeSendMessage({type:PLATFORM_META[platform].login});
+          return;
+        }
+
+        if(platformsSelected.has(platform)){
+          platformsSelected.delete(platform);
+          userDeselected.add(platform);
+        }else{
+          platformsSelected.add(platform);
+          userDeselected.delete(platform);
+        }
+        renderPlatformCards();
+        updateEstimate();
+      });
+
+      card.addEventListener('keydown',event=>{
+        if(event.key==='Enter'||event.key===' '){
+          event.preventDefault();
+          card.click();
+        }
+      });
+    });
+  };
+
   // 刷新平台登录态
-  const refreshPlatformCards=async()=>{
+  const refreshPlatformCards=async(silent=false)=>{
+    if(refreshing)return;
+    refreshing=true;
+    updateEstimate();
+
+    const refreshButton=root.querySelector<HTMLButtonElement>('.jc-auth-refresh');
+    if(refreshButton){
+      refreshButton.disabled=true;
+      refreshButton.classList.add('is-spinning');
+    }
+
+    if(!silent){
+      modalAuths=(['csdn','wechat','cnblogs','zhihu'] as PlatformId[]).map(p=>({
+        platform:p,
+        name:PLATFORM_META[p].name,
+        ok:true,
+        loggedIn:false,
+        loading:true
+      }));
+      renderPlatformCards();
+    }
+
     try{
       const fresh=await Promise.all((['csdn','wechat','cnblogs','zhihu'] as PlatformId[]).map(checkPlatform));
       modalAuths=fresh;
-      const grid=root.querySelector('#jc-batch-platform-grid');
-      if(!grid)return;
-      grid.innerHTML=fresh.map(auth=>platformCard(auth,platformsSelected.has(auth.platform))).join('');
-
-      // 绑定平台卡片点击切换与去登录
-      grid.querySelectorAll<HTMLElement>('.jc-platform-card').forEach(card=>{
-        const platform=card.dataset.platform as PlatformId;
-        const auth=modalAuths.find(a=>a.platform===platform);
-        card.addEventListener('click',event=>{
-          const target=event.target as HTMLElement;
-          if(target.closest('.jc-login-action-btn')||!auth?.loggedIn){
-            event.preventDefault();
-            void safeSendMessage({type:PLATFORM_META[platform].login});
-            return;
-          }
-          if(platformsSelected.has(platform)){
-            platformsSelected.delete(platform);
-          }else{
-            platformsSelected.add(platform);
-          }
-          const checkbox=card.querySelector('.jc-custom-checkbox');
-          checkbox?.classList.toggle('is-checked',platformsSelected.has(platform));
-          card.classList.toggle('is-selected',platformsSelected.has(platform));
-          updateEstimate();
-        });
-      });
-    }catch{}
+      for(const auth of fresh){
+        if(!auth.loggedIn){
+          // 未登录状态视作未勾选
+          platformsSelected.delete(auth.platform);
+        }else if(!initialized||!userDeselected.has(auth.platform)){
+          // 首次加载或新登录且用户未主动取消勾选的平台，默认勾选
+          platformsSelected.add(auth.platform);
+        }
+      }
+      initialized=true;
+    }catch(err){
+      console.warn('刷新平台登录态异常:',err);
+    }finally{
+      refreshing=false;
+      if(refreshButton){
+        refreshButton.disabled=false;
+        refreshButton.classList.remove('is-spinning');
+      }
+      renderPlatformCards();
+      updateEstimate();
+    }
   };
-  void refreshPlatformCards();
+
+  currentDialogRefresh=async()=>{
+    await refreshPlatformCards(true);
+  };
+
+  void refreshPlatformCards(false);
 
   const refreshButton=root.querySelector<HTMLButtonElement>('.jc-auth-refresh');
-  refreshButton?.addEventListener('click',async()=>{
-    if(refreshButton.disabled)return;
-    refreshButton.disabled=true;
-    refreshButton.classList.add('is-refreshing');
-    await refreshPlatformCards();
-    refreshButton.classList.remove('is-refreshing');
-    refreshButton.disabled=false;
-  });
+  refreshButton?.addEventListener('click',()=>void refreshPlatformCards(false));
 
   // 启动批量同步
   const startBtn=root.querySelector<HTMLButtonElement>('.jc-batch-start-btn');
   startBtn?.addEventListener('click',async()=>{
-    if(selectedList.length===0||platformsSelected.size===0)return;
+    // 严格过滤仅保留已登录且勾选的平台
+    const validPlatforms=[...platformsSelected].filter(p=>{
+      const auth=modalAuths.find(a=>a.platform===p);
+      return auth&&auth.loggedIn===true;
+    });
+    if(selectedList.length===0||validPlatforms.length===0)return;
 
     // 切换到执行看板视图
     const configView=root.querySelector<HTMLElement>('.jc-batch-view-config');
@@ -1068,10 +1151,10 @@ function openBatchSyncWizard(){
     if(execView)execView.style.display='block';
     if(footer)footer.style.display='none';
 
-    // 构造任务项
+    // 构造任务项：按平台交错轮转排列，有效平滑打散同一平台的网络脉冲
     const tasks:BatchTaskItem[]=[];
     for(const article of selectedList){
-      for(const platform of platformsSelected){
+      for(const platform of validPlatforms){
         tasks.push({
           id:`${article.articleId}:${platform}`,
           articleId:article.articleId,

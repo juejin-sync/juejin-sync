@@ -1,7 +1,7 @@
 // CSDN 草稿 API 适配器：清洗 Markdown、转存图片，并直接保存到草稿箱。
 import {marked} from 'marked';
 import type {Article,ExtensionSettings,ImageFailurePolicy,TaskErrorCategory,TaskProgress} from '../types';
-import {mapConcurrent,retry} from '../core/async';
+import {mapConcurrent,retry,sleep} from '../core/async';
 import {SyncError} from '../core/diagnostic';
 import {resolveCsdnCategories} from '../core/settings';
 import type {AdapterResult} from './adapter';
@@ -459,7 +459,7 @@ export function collectExternalImages(markdown:string){
 }
 
 /** CSDN 无法稳定读取掘金 CDN，保存前将正文和封面图片转存到 CSDN。 */
-type SaveDraftOptions={articleId?:string;categories?:string[];syncCover?:boolean;autoSummary?:boolean;appendSourceLink?:boolean;imageFailurePolicy?:ImageFailurePolicy;onPreparing?:()=>void|Promise<void>;onProgress?:(progress:TaskProgress)=>void|Promise<void>;onSaving?:()=>void|Promise<void>;onDowngradeToCreate?:()=>void|Promise<void>};
+type SaveDraftOptions={articleId?:string;categories?:string[];syncCover?:boolean;autoSummary?:boolean;appendSourceLink?:boolean;imageFailurePolicy?:ImageFailurePolicy;_rateLimitRetried?:boolean;rateLimitDelayMs?:number;onPreparing?:()=>void|Promise<void>;onProgress?:(progress:TaskProgress)=>void|Promise<void>;onSaving?:()=>void|Promise<void>;onDowngradeToCreate?:()=>void|Promise<void>};
 type ImageTransfer={src:string;target?:string;error?:string;errorCategory?:TaskErrorCategory};
 
 export function summarizeImageTransfers(transfers:ImageTransfer[]){
@@ -546,14 +546,32 @@ export async function saveDraftViaApi(article:Article,options:SaveDraftOptions={
       await options.onDowngradeToCreate?.();
       return saveDraftViaApi(article,{...options,articleId:undefined},preparedResult);
     }
+    // 频控识别：CSDN 响应 400 且文本包含「文章频繁发布」或「频繁」或「稍后再试」
+    if(response.status===400&&(text.includes('频繁')||text.includes('稍后再试'))){
+      if(!options._rateLimitRetried){
+        const delay=options.rateLimitDelayMs??4000;
+        if(delay>0)await sleep(delay);
+        return saveDraftViaApi(article,{...options,_rateLimitRetried:true},preparedResult);
+      }
+      throw new SyncError('CSDN 发文过于频繁，已被平台临时限流，请稍后再试','rate-limit','draft');
+    }
     throw new SyncError('CSDN API 请求失败 ('+response.status+')'+(text?': '+text.slice(0,120):''),statusErrorCategory(response.status)??'platform-change','draft');
   }
   let result:{code?:number;msg?:string;message?:string;data?:{id?:string;article_id?:string;url?:string}};
   try{result=await response.json();if(!result||typeof result!=='object')throw new Error('invalid response');}
   catch{throw new SyncError('CSDN 已响应保存请求，但结果无法解析，请先检查草稿箱','interrupted','draft');}
   if(result.code!==200&&result.code!==0){
+    const msg=result.msg||result.message||'';
+    if(msg.includes('频繁')||msg.includes('稍后再试')){
+      if(!options._rateLimitRetried){
+        const delay=options.rateLimitDelayMs??4000;
+        if(delay>0)await sleep(delay);
+        return saveDraftViaApi(article,{...options,_rateLimitRetried:true},preparedResult);
+      }
+      throw new SyncError('CSDN 发文过于频繁，已被平台临时限流，请稍后再试','rate-limit','draft');
+    }
     if(typeof result.code!=='number')throw new SyncError('CSDN 保存响应缺少结果码，请先检查草稿箱确认结果','interrupted','draft');
-    throw new SyncError(result.msg||result.message||'CSDN 返回错误码 '+result.code,'platform-change','draft');
+    throw new SyncError(msg||'CSDN 返回错误码 '+result.code,'platform-change','draft');
   }
   const articleId=result.data?.id||result.data?.article_id;
   const draftUrl=result.data?.url||(articleId?'https://editor.csdn.net/md/?articleId='+articleId:'');
