@@ -8,7 +8,8 @@ export const defaultSettings:ExtensionSettings={
   autoSummary:true,
   appendSourceLink:true,
   imageFailurePolicy:'continue',
-  confirmDraftUpdate:false
+  confirmDraftUpdate:false,
+  wechatCodeTheme:'onedark'
 };
 
 function clean(value:unknown){return typeof value==='string'?value.trim():'';}
@@ -16,6 +17,8 @@ function clean(value:unknown){return typeof value==='string'?value.trim():'';}
 export function normalizeSettings(value:unknown):ExtensionSettings{
   const input=value&&typeof value==='object'?value as Partial<ExtensionSettings>:{};
   const mappings=Array.isArray(input.categoryMappings)?input.categoryMappings.map(item=>({sourceTag:clean(item?.sourceTag),targetCategory:clean(item?.targetCategory)})).filter(item=>item.sourceTag&&item.targetCategory):[];
+  const themeCandidate=input.wechatCodeTheme;
+  const wechatCodeTheme=themeCandidate==='github-light'||themeCandidate==='monokai'?themeCandidate:'onedark';
   return{
     defaultCsdnCategory:clean(input.defaultCsdnCategory),
     categoryMappings:mappings,
@@ -23,7 +26,8 @@ export function normalizeSettings(value:unknown):ExtensionSettings{
     autoSummary:input.autoSummary!==false,
     appendSourceLink:input.appendSourceLink!==false,
     imageFailurePolicy:input.imageFailurePolicy==='abort'?'abort':'continue',
-    confirmDraftUpdate:input.confirmDraftUpdate===true
+    confirmDraftUpdate:input.confirmDraftUpdate===true,
+    wechatCodeTheme
   };
 }
 

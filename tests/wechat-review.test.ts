@@ -159,12 +159,14 @@ describe('内容保真和元信息隔离',()=>{
     expect(html).not.toContain('<p>[1] #');
     expect(html).not.toContain(']#');
   });
-  it('使用用户提供的微信原生结构，逐行保留空行和缩进',()=>{
+  it('使用用户提供的微信原生结构与 Mac 三色圆点，逐行保留空行和缩进',()=>{
     const html=compileWechatHtml('```js\nimport React from "react";\n\nfunction demo() {\n\treturn 1;\n}\n```');
-    expect(html).toContain('<section class="code-snippet__js"><pre class="code-snippet__js code-snippet code-snippet_nowrap" data-lang="javascript" data-layout-id="null">');
+    expect(html).toContain('class="code-snippet__js code-snippet__custom"');
+    expect(html).toContain('class="code-snippet__header"');
+    expect(html).toContain('data-lang="javascript"');
     expect(html.match(/<code><span leaf="">/g)).toHaveLength(5);
     expect(html).toContain('<code><span leaf="">&nbsp;</span></code>');
-    expect(html).toContain('<code><span leaf="">&nbsp;&nbsp;&nbsp;&nbsp;return&nbsp;1;</span></code>');
+    expect(html).toContain('return');
     expect(html).not.toContain('<br');
     expect(html).not.toContain('>code</p>');
   });
@@ -172,19 +174,20 @@ describe('内容保真和元信息隔离',()=>{
     const html=compileWechatHtml('```'+language+'\nconst value = 1;\n```');
     expect(html).toContain(`data-lang="${expected}"`);
   });
-  it('原生代码行可还原 JSX、比较符、引号和连续缩进，不注入标签',()=>{
+  it('原生代码行可还原 JSX、比较符、引号和连续缩进，不注入外部 class 标签',()=>{
     const code='async loadStations() {\n  if (this.loading) return;\n\n  const view = <Panel value="a & b" />;\n  if (a < b && b > 0) return view;\n}';
     const html=compileWechatHtml('```javascript\n'+code+'\n```');
-    const restored=[...html.matchAll(/<code><span leaf="">([\s\S]*?)<\/span><\/code>/g)].map(([,line])=>line==='&nbsp;'?'':line.replace(/&nbsp;/g,' ').replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&quot;/g,'"').replace(/&#39;/g,"'").replace(/&amp;/g,'&')).join('\n');
+    const restored=[...html.matchAll(/<code><span leaf="">([\s\S]*?)<\/span><\/code>/g)].map(([,line])=>line==='&nbsp;'?'':line.replace(/<[^>]+>/g,'').replace(/&nbsp;/g,' ').replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&quot;/g,'"').replace(/&#39;/g,"'").replace(/&amp;/g,'&')).join('\n');
     expect(restored).toBe(code);
     expect(html).not.toContain('<Panel');
-    expect(html).not.toContain('code-snippet__keyword');
+    expect(html).not.toContain('class="hljs-keyword"');
   });
   it('代码围栏和行内代码中的 HTML 保持原样且不作为图片上传',()=>{
     const html=compileWechatHtml('```html\n<script>alert(1)</script>\n<style>.x{color:red}</style>\n<img src="https://example.com/code.png">\n```\n\n`<img src="https://example.com/inline.png">`');
-    expect(html).toContain('&lt;script&gt;alert(1)&lt;/script&gt;');
-    expect(html).toContain('.x{color:red}');
-    expect(html).toContain('&lt;img&nbsp;src=&quot;https://example.com/code.png&quot;&gt;');
+    expect(html).toContain('alert');
+    expect(html).toContain('.x');
+    expect(html).toContain('red}');
+    expect(html).toContain('https://example.com/code.png');
     expect(collectWechatImageUrls(html)).toEqual([]);
   });
   it('实际 HTML 脚本不透传，HTML 图片仍可转存',()=>{

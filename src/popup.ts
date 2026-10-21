@@ -366,6 +366,7 @@ function renderSettings(settings:ExtensionSettings){
   $<HTMLInputElement>('#append-source-link').checked=settings.appendSourceLink;
   $<HTMLInputElement>('#confirm-update').checked=settings.confirmDraftUpdate;
   $<HTMLSelectElement>('#image-failure').value=settings.imageFailurePolicy;
+  $<HTMLSelectElement>('#wechat-code-theme').value=settings.wechatCodeTheme||'onedark';
   $<HTMLInputElement>('#default-category').value=settings.defaultCsdnCategory;
   $<HTMLTextAreaElement>('#category-mappings').value=formatCategoryMappings(settings.categoryMappings);
 }
@@ -377,6 +378,7 @@ async function saveSettingsFromForm(){
     appendSourceLink:$<HTMLInputElement>('#append-source-link').checked,
     confirmDraftUpdate:$<HTMLInputElement>('#confirm-update').checked,
     imageFailurePolicy:$<HTMLSelectElement>('#image-failure').value,
+    wechatCodeTheme:$<HTMLSelectElement>('#wechat-code-theme').value,
     defaultCsdnCategory:$<HTMLInputElement>('#default-category').value,
     categoryMappings:parseCategoryMappings($<HTMLTextAreaElement>('#category-mappings').value)
   });
@@ -534,7 +536,7 @@ $<HTMLButtonElement>('#history-clear').addEventListener('click',async()=>{
   await loadTasks();
 });
 
-['#sync-cover','#auto-summary','#append-source-link','#confirm-update','#image-failure'].forEach(selector=>$(selector).addEventListener('change',()=>void saveSettingsFromForm()));
+['#sync-cover','#auto-summary','#append-source-link','#confirm-update','#image-failure','#wechat-code-theme'].forEach(selector=>$(selector).addEventListener('change',()=>void saveSettingsFromForm()));
 ['#default-category','#category-mappings'].forEach(selector=>$(selector).addEventListener('change',()=>void saveSettingsFromForm()));
 
 $('#health-detail').addEventListener('click',()=>void chrome.tabs.create({url:STATUS_PAGE_URL,active:true}));

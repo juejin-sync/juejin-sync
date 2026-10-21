@@ -1,5 +1,5 @@
 // 微信公众号 Web 端适配器：复用当前浏览器登录态，转存图片、裁剪封面并创建草稿。
-import type {Article,TaskProgress} from '../types';
+import type {Article,TaskProgress,WechatCodeTheme} from '../types';
 import {mapConcurrent,retry} from '../core/async';
 import {SyncError} from '../core/diagnostic';
 import {downloadImageBlob,extractSummary,imageExtension,stripJuejinImageParams} from './csdn-api';
@@ -96,7 +96,7 @@ export function buildWechatDraftForm(article:Article,content:string,meta:WechatM
   Object.entries(base).forEach(([key,value])=>form.set(key,value));return form;
 }
 
-type SaveOptions={appMsgId?:string;accountId?:string;onPreparing?:()=>void;onProgress?:(progress:TaskProgress)=>void|Promise<void>;onSaving?:()=>void|Promise<void>};
+type SaveOptions={appMsgId?:string;accountId?:string;theme?:WechatCodeTheme;onPreparing?:()=>void;onProgress?:(progress:TaskProgress)=>void|Promise<void>;onSaving?:()=>void|Promise<void>};
 export async function saveWechatDraft(article:Article,options:SaveOptions={}){
   if(article.title.trim().length<1||article.title.trim().length>64)throw new SyncError('微信公众号标题需为 1～64 个字符','content','validation');
   if(article.markdown.trim().length<20)throw new SyncError('文章正文不完整，暂无法同步到微信公众号','content','validation');
@@ -106,7 +106,7 @@ export async function saveWechatDraft(article:Article,options:SaveOptions={}){
   let html:string;
   try{
     const mermaidImages=await renderAllMermaidBlocks(article.markdown);
-    html=compileWechatHtml(article.markdown,{mermaidImages});
+    html=compileWechatHtml(article.markdown,{mermaidImages,theme:options.theme});
   }catch(error){
     throw new SyncError(`微信文章排版编译失败：${(error as Error).message}`,'content','content');
   }

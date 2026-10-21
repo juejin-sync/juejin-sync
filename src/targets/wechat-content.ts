@@ -1,11 +1,176 @@
 // 微信公众号内容编译器：将掘金 Markdown 重新渲染为微信编辑器可稳定保存的内联样式 HTML。
 import {Marked,Renderer,type Token} from 'marked';
+import hljs from 'highlight.js/lib/common';
+import type {WechatCodeTheme} from '../types';
 import {normalizeMarkdown} from './csdn-api';
 import {resolveMermaidDiagram} from '../core/mermaid-render';
 
 const COLORS={text:'#2b2b2b',muted:'#666666',accent:'#1d6744',border:'#dfe6e2',soft:'#f5f7f6',code:'#f6f8fa'};
 
+export const WECHAT_CODE_THEMES:Record<WechatCodeTheme,{
+  codeBg:string;
+  headerBg:string;
+  border:string;
+  textColor:string;
+  langColor:string;
+  tokenStyles:Record<string,string>;
+}>={
+  'github-light':{
+    codeBg:'#ffffff',
+    headerBg:'#f6f8fa',
+    border:'#e1e4e8',
+    textColor:'#24292e',
+    langColor:'#6a737d',
+    tokenStyles:{
+      'hljs-keyword':'color:#d73a49;font-weight:600;',
+      'hljs-built_in':'color:#005cc5;',
+      'hljs-type':'color:#005cc5;',
+      'hljs-literal':'color:#005cc5;',
+      'hljs-number':'color:#005cc5;',
+      'hljs-operator':'color:#d73a49;',
+      'hljs-punctuation':'color:#24292e;',
+      'hljs-property':'color:#005cc5;',
+      'hljs-regexp':'color:#032f62;',
+      'hljs-string':'color:#032f62;',
+      'hljs-subst':'color:#24292e;',
+      'hljs-symbol':'color:#005cc5;',
+      'hljs-class':'color:#6f42c1;font-weight:600;',
+      'hljs-function':'color:#6f42c1;font-weight:600;',
+      'hljs-title':'color:#6f42c1;font-weight:600;',
+      'function_':'color:#6f42c1;font-weight:600;',
+      'hljs-params':'color:#24292e;',
+      'hljs-comment':'color:#6a737d;font-style:italic;',
+      'hljs-doctag':'color:#d73a49;',
+      'hljs-meta':'color:#005cc5;',
+      'hljs-attr':'color:#005cc5;',
+      'hljs-attribute':'color:#005cc5;',
+      'hljs-name':'color:#22863a;',
+      'hljs-tag':'color:#22863a;',
+      'hljs-variable':'color:#e36209;'
+    }
+  },
+  'onedark':{
+    codeBg:'#282c34',
+    headerBg:'#21252b',
+    border:'#181a1f',
+    textColor:'#abb2bf',
+    langColor:'#828997',
+    tokenStyles:{
+      'hljs-keyword':'color:#c678dd;font-weight:600;',
+      'hljs-built_in':'color:#e6c07b;',
+      'hljs-type':'color:#e6c07b;',
+      'hljs-literal':'color:#56b6c2;',
+      'hljs-number':'color:#d19a66;',
+      'hljs-operator':'color:#56b6c2;',
+      'hljs-punctuation':'color:#abb2bf;',
+      'hljs-property':'color:#e06c75;',
+      'hljs-regexp':'color:#98c379;',
+      'hljs-string':'color:#98c379;',
+      'hljs-subst':'color:#abb2bf;',
+      'hljs-symbol':'color:#61afef;',
+      'hljs-class':'color:#e5c07b;font-weight:600;',
+      'hljs-function':'color:#61afef;font-weight:600;',
+      'hljs-title':'color:#61afef;font-weight:600;',
+      'function_':'color:#61afef;font-weight:600;',
+      'hljs-params':'color:#abb2bf;',
+      'hljs-comment':'color:#5c6370;font-style:italic;',
+      'hljs-doctag':'color:#c678dd;',
+      'hljs-meta':'color:#61afef;',
+      'hljs-attr':'color:#d19a66;',
+      'hljs-attribute':'color:#98c379;',
+      'hljs-name':'color:#e06c75;',
+      'hljs-tag':'color:#e06c75;',
+      'hljs-variable':'color:#e06c75;'
+    }
+  },
+  'monokai':{
+    codeBg:'#272822',
+    headerBg:'#1e1f1c',
+    border:'#171814',
+    textColor:'#f8f8f2',
+    langColor:'#75715e',
+    tokenStyles:{
+      'hljs-keyword':'color:#f92672;font-weight:600;',
+      'hljs-built_in':'color:#66d9ef;',
+      'hljs-type':'color:#66d9ef;',
+      'hljs-literal':'color:#ae81ff;',
+      'hljs-number':'color:#ae81ff;',
+      'hljs-operator':'color:#f92672;',
+      'hljs-punctuation':'color:#f8f8f2;',
+      'hljs-property':'color:#a6e22e;',
+      'hljs-regexp':'color:#e6db74;',
+      'hljs-string':'color:#e6db74;',
+      'hljs-subst':'color:#f8f8f2;',
+      'hljs-symbol':'color:#ae81ff;',
+      'hljs-class':'color:#a6e22e;font-weight:600;',
+      'hljs-function':'color:#a6e22e;font-weight:600;',
+      'hljs-title':'color:#a6e22e;font-weight:600;',
+      'function_':'color:#a6e22e;font-weight:600;',
+      'hljs-params':'color:#fd971f;',
+      'hljs-comment':'color:#75715e;font-style:italic;',
+      'hljs-doctag':'color:#f92672;',
+      'hljs-meta':'color:#75715e;',
+      'hljs-attr':'color:#a6e22e;',
+      'hljs-attribute':'color:#e6db74;',
+      'hljs-name':'color:#f92672;',
+      'hljs-tag':'color:#f92672;',
+      'hljs-variable':'color:#f8f8f2;'
+    }
+  }
+};
+
 function escapeHtml(value:string){return value.replace(/[&<>"']/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]!));}
+
+export function highlightWechatCode(code:string,language:string,theme:WechatCodeTheme):string{
+  const config=WECHAT_CODE_THEMES[theme]||WECHAT_CODE_THEMES.onedark;
+  const normalizedLang=language.trim().toLowerCase();
+  const aliasLang=({js:'javascript',ts:'typescript',py:'python',sh:'bash',zsh:'bash'} as Record<string,string>)[normalizedLang]||normalizedLang;
+
+  let highlighted='';
+  if(aliasLang&&hljs.getLanguage(aliasLang)){
+    try{
+      highlighted=hljs.highlight(code,{language:aliasLang,ignoreIllegals:true}).value;
+    }catch{
+      highlighted=escapeHtml(code);
+    }
+  }else{
+    highlighted=escapeHtml(code);
+  }
+
+  const inlined=highlighted.replace(/<span\s+class="([^"]+)">/g,(_match,classListStr)=>{
+    const classes=classListStr.split(/\s+/);
+    const styles:string[]=[];
+    for(const cls of classes){
+      const style=config.tokenStyles[cls];
+      if(style)styles.push(style);
+    }
+    return styles.length?`<span style="${styles.join(' ')}">`:'<span>';
+  });
+
+  return inlined.split(/(<[^>]+>)/g).map(part=>{
+    if(part.startsWith('<')&&part.endsWith('>'))return part;
+    return part.replace(/ /g,'&nbsp;');
+  }).join('');
+}
+
+export function renderMacCodeCard(highlightedCode:string,language:string,theme:WechatCodeTheme):string{
+  const config=WECHAT_CODE_THEMES[theme]||WECHAT_CODE_THEMES.onedark;
+  const normalizedLang=language.trim().toLowerCase();
+  const displayLang=normalizedLang?escapeHtml(normalizedLang):'';
+  const lines=highlightedCode.split('\n').map(line=>`<code><span leaf="">${line||'&nbsp;'}</span></code>`).join('');
+
+  return`<section class="code-snippet__js code-snippet__custom" style="margin:20px 0;border-radius:8px;overflow:hidden;background-color:${config.codeBg};box-shadow:0 4px 16px rgba(0,0,0,0.12);border:1px solid ${config.border};font-size:13px;font-family:Menlo,Monaco,Consolas,'Courier New',monospace;line-height:1.65;-webkit-font-smoothing:antialiased;">`+
+    `<div class="code-snippet__header" style="display:flex;align-items:center;height:32px;padding:0 12px;background-color:${config.headerBg};border-bottom:1px solid ${config.border};box-sizing:border-box;user-select:none;">`+
+      `<span style="display:inline-block;width:10px;height:10px;border-radius:50%;background-color:#ff5f56;margin-right:6px;flex:0 0 auto;"></span>`+
+      `<span style="display:inline-block;width:10px;height:10px;border-radius:50%;background-color:#ffbd2e;margin-right:6px;flex:0 0 auto;"></span>`+
+      `<span style="display:inline-block;width:10px;height:10px;border-radius:50%;background-color:#27c93f;margin-right:8px;flex:0 0 auto;"></span>`+
+      (displayLang?`<span style="margin-left:auto;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;font-size:11px;color:${config.langColor};text-transform:lowercase;font-weight:500;letter-spacing:0.5px;">${displayLang}</span>`:'')+
+    `</div>`+
+    `<div style="padding:12px 14px;overflow-x:auto;-webkit-overflow-scrolling:touch;background-color:${config.codeBg};">`+
+      `<pre class="code-snippet__js code-snippet code-snippet_nowrap" data-lang="${displayLang}" data-layout-id="null" style="margin:0;padding:0;font-family:inherit;font-size:12.5px;line-height:1.65;white-space:pre;word-break:normal;color:${config.textColor};tab-size:2;background:transparent;border:none;">${lines}</pre>`+
+    `</div>`+
+  `</section>`;
+}
 
 /** 仅合并加粗或行内代码后以标点开头的正文段落，不改写代码 token。 */
 function joinPunctuationParagraphs(tokens:Token[]){
@@ -65,8 +230,9 @@ function cleanFinalWechatHtml(html:string):string{
     });
 }
 
-/** 普通正文使用内联样式；代码块保留微信编辑器专用的结构和 class；Mermaid 图表支持渲染为图片。 */
-export function compileWechatHtml(markdown:string,options?:{mermaidImages?:Map<string,string>}){
+/** 普通正文使用内联样式；代码块保留微信编辑器专用的结构与经典 Mac 三色圆点卡片高亮；Mermaid 图表支持渲染为图片。 */
+export function compileWechatHtml(markdown:string,options?:{mermaidImages?:Map<string,string>;theme?:WechatCodeTheme}){
+  const theme:WechatCodeTheme=options?.theme||'onedark';
   // 仅处理解析后的 HTML 节点，不修改围栏代码与行内代码中的标签示例。
   const references:string[]=[];
   // 暂存代码 HTML，正文清洗完成后还原，防止空白和标点处理进入字面量。
@@ -90,19 +256,11 @@ export function compileWechatHtml(markdown:string,options?:{mermaidImages?:Map<s
       }
       throw new Error('Mermaid 图表缺少渲染图片，已停止生成缺图正文');
     }
-    // 按微信“插入代码”样本逐行输出 code/leaf，不能用一个 code 包住整段正文。
-    const lines=text.replace(/\r\n?/g,'\n').split('\n').map(line=>{
-      let column=0;
-      const expanded=Array.from(line).map(char=>{
-        if(char==='\t'){const width=4-column%4;column+=width;return' '.repeat(width);}
-        column++;return char;
-      }).join('');
-      return`<code><span leaf="">${escapeHtml(expanded).replace(/ /g,'&nbsp;')||'&nbsp;'}</span></code>`;
-    }).join('');
-    // 围栏后可附带标题等元信息，仅首个标记是语言；未标注时不猜测语言。
+    const cleanCode=text.replace(/\r\n?/g,'\n').replace(/\t/g,'  ');
     const language=lang?.trim().split(/\s+/)[0]||'';
-    const normalizedLanguage=({js:'javascript',ts:'typescript'} as Record<string,string>)[language]||language;
-    return preserveLiteral(`<section class="code-snippet__js"><pre class="code-snippet__js code-snippet code-snippet_nowrap" data-lang="${escapeHtml(normalizedLanguage)}" data-layout-id="null">${lines}</pre></section>`);
+    const normalizedLanguage=({js:'javascript',ts:'typescript',py:'python',sh:'bash',zsh:'bash'} as Record<string,string>)[language]||language;
+    const highlighted=highlightWechatCode(cleanCode,normalizedLanguage,theme);
+    return preserveLiteral(renderMacCodeCard(highlighted,normalizedLanguage,theme));
   };
   renderer.codespan=function({text}){return preserveLiteral(`<span style="display:inline;padding:2px 5px;border-radius:3px;background:${COLORS.code};color:#c7254e;font-size:0.9em;font-family:Menlo,Consolas,monospace;word-break:break-word;overflow-wrap:break-word;">${escapeHtml(text)}</span>`);};
   renderer.strong=function({tokens}){return`<strong style="font-weight:700;color:${COLORS.text};display:inline;">${cleanInlineHtml(this.parser.parseInline(tokens))}</strong>`;};
