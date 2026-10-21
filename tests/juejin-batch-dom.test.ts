@@ -79,24 +79,18 @@ describe('掘金历史文章批量同步向导核心算法与缓存',()=>{
     }
   });
 
-  it('单行弹性标题包裹结构确保复选框与标题在同一水平行内且不破坏元信息布局',()=>{
+  it('把勾选框直接放到 essay-list 下且阻止冒泡，内容区封装为 jc-essay-content',()=>{
     class MockElement {
       children: MockElement[] = [];
       parentElement: MockElement | null = null;
       className = '';
       tagName = 'div';
+      listeners: Record<string, Function[]> = {};
       constructor(tagName = 'div') { this.tagName = tagName; }
       appendChild(child: MockElement) {
         if (child.parentElement) child.parentElement.removeChild(child);
         child.parentElement = this;
         this.children.push(child);
-      }
-      insertBefore(newChild: MockElement, refChild: MockElement) {
-        if (newChild.parentElement) newChild.parentElement.removeChild(newChild);
-        const index = this.children.indexOf(refChild);
-        newChild.parentElement = this;
-        if (index === -1) this.children.push(newChild);
-        else this.children.splice(index, 0, newChild);
       }
       removeChild(child: MockElement) {
         const index = this.children.indexOf(child);
@@ -105,64 +99,119 @@ describe('掘金历史文章批量同步向导核心算法与缓存',()=>{
           this.children.splice(index, 1);
         }
       }
-      closest(className: string): MockElement | null {
-        let cur: MockElement | null = this;
-        while (cur) {
-          if (cur.className.includes(className.replace('.', ''))) return cur;
-          cur = cur.parentElement;
+      querySelector(selector: string): MockElement | null {
+        const targetClass = selector.replace(':scope > ', '').replace('.', '').split('[')[0];
+        for (const child of this.children) {
+          if (child.className.includes(targetClass)) return child;
+          const found = child.querySelector(selector);
+          if (found) return found;
         }
         return null;
       }
+      addEventListener(type: string, fn: Function) {
+        if (!this.listeners[type]) this.listeners[type] = [];
+        this.listeners[type].push(fn);
+      }
+      dispatchEvent(event: { type: string; stopPropagation: Function }) {
+        this.listeners[event.type]?.forEach(fn => fn(event));
+      }
     }
 
-    const container = new MockElement('div');
-    const link = new MockElement('a');
-    link.className = 'title';
-    const subTitle = new MockElement('div');
-    subTitle.className = 'sub-title';
+    // 模拟掘金原生 .essay-list：包含 .first-line 和 .infos
+    const essayRow = new MockElement('div');
+    essayRow.className = 'essay-list';
 
-    container.appendChild(link);
-    container.appendChild(subTitle);
+    const firstLine = new MockElement('div');
+    firstLine.className = 'first-line';
+    const title = new MockElement('span');
+    title.className = 'title';
+    firstLine.appendChild(title);
 
-    // 执行 titleRow 注入逻辑
-    let titleRow = link.closest('.jc-title-flex-row');
-    if (!titleRow) {
-      titleRow = new MockElement('div');
-      titleRow.className = 'jc-title-flex-row';
-      container.insertBefore(titleRow, link);
-      titleRow.appendChild(link);
+    const infos = new MockElement('div');
+    infos.className = 'infos';
+
+    essayRow.appendChild(firstLine);
+    essayRow.appendChild(infos);
+
+    // 执行用户的 essay-list 结构重塑逻辑
+    let contentWrap = essayRow.querySelector('.jc-essay-content');
+    if (!contentWrap) {
+      contentWrap = new MockElement('div');
+      contentWrap.className = 'jc-essay-content';
+      const existingChildren = [...essayRow.children];
+      for (const child of existingChildren) {
+        contentWrap.appendChild(child);
+      }
+
+      const wrap = new MockElement('div');
+      wrap.className = 'jc-article-select-wrap';
+      const checkbox = new MockElement('input');
+      checkbox.className = 'jc-article-select-checkbox';
+
+      let stopped = false;
+      checkbox.addEventListener('click', (e: any) => { e.stopPropagation(); });
+      wrap.appendChild(checkbox);
+
+      essayRow.appendChild(wrap);
+      essayRow.appendChild(contentWrap);
+
+      // 测试点击冒泡拦截
+      const mockEvent = { type: 'click', stopPropagation: () => { stopped = true; } };
+      checkbox.dispatchEvent(mockEvent);
+      expect(stopped).toBe(true);
     }
-    const wrap = new MockElement('div');
-    wrap.className = 'jc-article-select-wrap';
-    const checkbox = new MockElement('input');
-    checkbox.className = 'jc-article-select-checkbox';
-    wrap.appendChild(checkbox);
-    titleRow.insertBefore(wrap, link);
 
-    // 验证结构：container 拥有 titleRow 和 subTitle 两个直接子节点
-    expect(container.children.length).toBe(2);
-    expect(container.children[0]).toBe(titleRow);
-    expect(container.children[1]).toBe(subTitle);
+    // 验证 essay-list 直接子节点是 [wrap, contentWrap]
+    expect(essayRow.children.length).toBe(2);
+    expect(essayRow.children[0].className).toBe('jc-article-select-wrap');
+    expect(essayRow.children[1].className).toBe('jc-essay-content');
 
-    // 验证 titleRow 内部：第 1 个是 wrap，第 2 个是 link（水平同级）
-    expect(titleRow.children.length).toBe(2);
-    expect(titleRow.children[0]).toBe(wrap);
-    expect(titleRow.children[1]).toBe(link);
+    // 验证 contentWrap 包含原生的 first-line 和 infos
+    expect(contentWrap.children.length).toBe(2);
+    expect(contentWrap.children[0]).toBe(firstLine);
+    expect(contentWrap.children[1]).toBe(infos);
   });
 
-  it('右侧浮动操作舱全选与清空状态切换自洽',()=>{
-    const selectedArticles=new Map<string,string>();
-    const totalCount=3;
+  it('顶部内嵌操作条与底部居中浮动胶囊状态双向同步',()=>{
+    const selectedArticles = new Map<string, string>();
+
+    // 状态计算函数
+    const computeState = (selectedCount: number, totalCount: number) => ({
+      hasSelected: selectedCount > 0,
+      count: selectedCount,
+      isAll: selectedCount > 0 && selectedCount === totalCount,
+      isIndeterminate: selectedCount > 0 && selectedCount < totalCount,
+      bottomPillVisible: selectedCount > 0
+    });
 
     // 初始状态：未勾选任何文章
-    expect(selectedArticles.size).toBe(0);
+    let state = computeState(selectedArticles.size, 5);
+    expect(state.hasSelected).toBe(false);
+    expect(state.bottomPillVisible).toBe(false);
+    expect(state.isAll).toBe(false);
 
-    // 模拟全选操作
-    ['art1','art2','art3'].forEach(id=>selectedArticles.set(id,`文章${id}`));
-    expect(selectedArticles.size).toBe(totalCount);
+    // 勾选 2 篇：半选状态，底部浮动胶囊升起，不遮挡右侧操作
+    selectedArticles.set('1', '文章1');
+    selectedArticles.set('2', '文章2');
+    state = computeState(selectedArticles.size, 5);
+    expect(state.hasSelected).toBe(true);
+    expect(state.count).toBe(2);
+    expect(state.bottomPillVisible).toBe(true);
+    expect(state.isIndeterminate).toBe(true);
+    expect(state.isAll).toBe(false);
 
-    // 模拟再次点击全选按钮（反选清空）
+    // 全选当前页 5 篇
+    ['3', '4', '5'].forEach(id => selectedArticles.set(id, `文章${id}`));
+    state = computeState(selectedArticles.size, 5);
+    expect(state.count).toBe(5);
+    expect(state.isAll).toBe(true);
+    expect(state.isIndeterminate).toBe(false);
+    expect(state.bottomPillVisible).toBe(true);
+
+    // 点击清空：瞬间隐藏底部胶囊
     selectedArticles.clear();
-    expect(selectedArticles.size).toBe(0);
+    state = computeState(selectedArticles.size, 5);
+    expect(state.hasSelected).toBe(false);
+    expect(state.bottomPillVisible).toBe(false);
   });
 });

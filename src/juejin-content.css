@@ -1034,23 +1034,20 @@ body[data-theme="dark"] .jc-creator-sync[data-state="login"] {
    历史文章批量同步向导 (Floating Bar & Wizard Modal)
    ========================================================================== */
 
-/* 文章列表多选框单行弹性对齐（彻底杜绝断行与孤立换行） */
-.jc-title-flex-row {
+/* ==========================================================================
+   文章列表多选与批量操作栏 (Header Toolbar & Bottom Floating Capsule)
+   ========================================================================== */
+
+/* 1. 掘金文章项 .essay-list 弹性基线排版与勾选包裹 */
+.essay-list {
   display: flex !important;
-  align-items: center !important;
-  gap: 8px !important;
-  min-width: 0 !important;
-  width: 100% !important;
+  align-items: baseline !important;
+  gap: 16px !important;
 }
 
-.jc-title-flex-row > a {
-  flex: 1 1 auto !important;
+.jc-essay-content {
+  flex: 1 !important;
   min-width: 0 !important;
-  margin: 0 !important;
-  display: inline-block !important;
-  white-space: nowrap !important;
-  overflow: hidden !important;
-  text-overflow: ellipsis !important;
 }
 
 .jc-article-select-wrap {
@@ -1058,16 +1055,15 @@ body[data-theme="dark"] .jc-creator-sync[data-state="login"] {
   align-items: center !important;
   justify-content: center !important;
   flex: 0 0 auto !important;
-  margin: 0 !important;
-  vertical-align: middle !important;
+  vertical-align: baseline !important;
 }
 
 .jc-article-select-checkbox {
   appearance: none;
   -webkit-appearance: none;
-  width: 16px;
-  height: 16px;
-  border: 1px solid #c9cdd4;
+  width: 17px;
+  height: 17px;
+  border: 1.5px solid #c9cdd4;
   border-radius: 4px;
   outline: none;
   background-color: #ffffff;
@@ -1081,7 +1077,7 @@ body[data-theme="dark"] .jc-creator-sync[data-state="login"] {
 
 .jc-article-select-checkbox:hover {
   border-color: #1e80ff;
-  box-shadow: 0 0 0 2px rgba(30, 128, 255, 0.15);
+  box-shadow: 0 0 0 3px rgba(30, 128, 255, 0.12);
 }
 
 .jc-article-select-checkbox:checked {
@@ -1100,111 +1096,124 @@ body[data-theme="dark"] .jc-creator-sync[data-state="login"] {
   margin-top: -2px;
 }
 
-/* 右侧竖向悬浮操作舱 (Right-Side Floating Batch Dock) */
-.jc-batch-dock {
-  position: fixed;
-  right: 24px;
-  top: 50%;
-  transform: translateY(-50%);
-  z-index: 9999;
-  width: 126px;
-  background: rgba(255, 255, 255, 0.94);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-  border: 1px solid rgba(0, 0, 0, 0.08);
-  border-radius: 16px;
-  box-shadow: 0 10px 30px -4px rgba(0, 0, 0, 0.12), 0 2px 8px rgba(0, 0, 0, 0.04);
-  padding: 12px 10px;
+/* 2. 顶部精炼操作条 (Natural Header Bar，杜绝任何浮动遮挡) */
+.jc-batch-header-bar {
   display: flex;
-  flex-direction: column;
-  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 16px;
+  margin: 10px 0 14px 0;
+  background: #f7f8fa;
+  border: 1px solid #e5e6eb;
+  border-radius: 8px;
+  box-sizing: border-box;
   user-select: none;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, PingFang SC, sans-serif;
-  transition: transform 0.28s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.2s ease;
-  box-sizing: border-box;
-}
-
-.jc-batch-dock:hover {
-  box-shadow: 0 14px 36px -4px rgba(0, 0, 0, 0.18), 0 4px 12px rgba(0, 0, 0, 0.06);
-}
-
-/* 顶部品牌与徽章 */
-.jc-dock-header {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 4px;
-  width: 100%;
-}
-
-.jc-dock-brand {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-}
-
-.jc-dock-logo-wrap img {
-  display: block;
-}
-
-.jc-dock-title {
-  font-size: 11.5px;
-  font-weight: 700;
-  color: #1d2129;
-  letter-spacing: -0.01em;
-}
-
-.jc-dock-badge {
-  font-size: 10.5px;
-  font-weight: 600;
-  color: #86909c;
-  background: #f2f3f5;
-  padding: 1px 8px;
-  border-radius: 99px;
   transition: all 0.2s ease;
 }
 
-.jc-dock-badge.has-selected {
+.jc-batch-header-left {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.jc-batch-select-all-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 13px;
+  font-weight: 500;
+  color: #1d2129;
+  cursor: pointer;
+}
+
+.jc-batch-select-all-label input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+}
+
+.jc-batch-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  border: 1px solid #e5e6eb;
+  border-radius: 5px;
+  background: #ffffff;
+  color: #4e5969;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.16s ease;
+}
+
+.jc-batch-btn:hover {
   background: #e8f3ff;
+  border-color: #bedaff;
   color: #1e80ff;
 }
 
-.jc-dock-badge .jc-count-number {
-  font-weight: 700;
+.jc-batch-btn svg {
+  width: 13px;
+  height: 13px;
 }
 
-/* 核心主按钮 (🚀 开始同步) */
-.jc-dock-primary-btn {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 2px;
-  width: 100%;
-  padding: 8px 6px;
+.jc-batch-count-tag {
+  font-size: 12.5px;
+  color: #86909c;
+}
+
+.jc-batch-count-tag .jc-count-number {
+  color: #1e80ff;
+  font-weight: 700;
+  margin: 0 1px;
+}
+
+.jc-batch-clear-btn {
+  background: none;
   border: none;
-  border-radius: 10px;
+  color: #86909c;
+  font-size: 12px;
+  cursor: pointer;
+  text-decoration: underline;
+  padding: 0;
+}
+
+.jc-batch-clear-btn:hover {
+  color: #f53f3f;
+}
+
+.jc-batch-header-right {
+  display: flex;
+  align-items: center;
+}
+
+.jc-batch-trigger-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 16px;
+  border: none;
+  border-radius: 6px;
   background: linear-gradient(135deg, #1e80ff 0%, #0066ee 100%);
   color: #ffffff;
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 600;
   cursor: pointer;
-  box-shadow: 0 3px 10px rgba(30, 128, 255, 0.32);
+  box-shadow: 0 2px 6px rgba(30, 128, 255, 0.28);
   transition: all 0.18s ease;
 }
 
-.jc-dock-primary-btn .jc-dock-rocket {
-  font-size: 15px;
-  line-height: 1;
-}
-
-.jc-dock-primary-btn:hover:not(:disabled) {
+.jc-batch-trigger-btn:hover:not(:disabled) {
   background: linear-gradient(135deg, #388fff 0%, #1574f5 100%);
-  box-shadow: 0 5px 16px rgba(30, 128, 255, 0.45);
+  box-shadow: 0 4px 12px rgba(30, 128, 255, 0.38);
   transform: translateY(-1px);
 }
 
-.jc-dock-primary-btn:disabled {
+.jc-batch-trigger-btn:disabled {
   background: #f2f3f5;
   color: #c9cdd4;
   cursor: not-allowed;
@@ -1212,113 +1221,121 @@ body[data-theme="dark"] .jc-creator-sync[data-state="login"] {
   transform: none;
 }
 
-/* 分隔线 */
-.jc-dock-divider {
-  width: 100%;
-  height: 1px;
-  background: #e5e6eb;
-  margin: 2px 0;
+.jc-batch-rocket-icon {
+  font-size: 14px;
 }
 
-/* 快捷操作区 (垂直排列) */
-.jc-dock-actions {
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
-  width: 100%;
-}
-
-.jc-dock-action-btn {
+/* 3. 底部居中高质感浮动胶囊 (Bottom-Center Floating Capsule，杜绝遮挡右侧按钮) */
+.jc-batch-bottom-pill {
+  position: fixed;
+  bottom: 28px;
+  left: 50%;
+  transform: translateX(-50%) translateY(80px);
+  opacity: 0;
+  pointer-events: none;
+  z-index: 9999;
   display: flex;
   align-items: center;
-  gap: 6px;
-  width: 100%;
-  padding: 5px 8px;
-  border: 1px solid #e5e6eb;
-  border-radius: 7px;
-  background: #f7f8fa;
-  color: #4e5969;
-  font-size: 11px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: all 0.16s ease;
+  gap: 12px;
+  padding: 8px 16px;
+  background: rgba(255, 255, 255, 0.94);
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  border-radius: 99px;
+  box-shadow: 0 12px 36px -4px rgba(0, 0, 0, 0.16), 0 2px 8px rgba(0, 0, 0, 0.04);
+  user-select: none;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, PingFang SC, sans-serif;
+  transition: transform 0.28s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.2s ease;
   white-space: nowrap;
 }
 
-.jc-dock-btn-svg {
-  width: 13px;
-  height: 13px;
-  flex-shrink: 0;
+.jc-batch-bottom-pill.is-visible {
+  transform: translateX(-50%) translateY(0);
+  opacity: 1;
+  pointer-events: auto;
 }
 
-.jc-dock-action-btn:hover:not(:disabled) {
-  background: #e8f3ff;
-  border-color: #bedaff;
-  color: #1e80ff;
-}
-
-.jc-dock-action-btn:disabled {
-  opacity: 0.45;
-  cursor: not-allowed;
-  background: #f7f8fa;
-  border-color: #e5e6eb;
-  color: #86909c;
-}
-
-.jc-dock-action-btn.is-all-selected {
-  background: #e8f3ff;
-  border-color: #bedaff;
-  color: #1e80ff;
-  font-weight: 600;
-}
-
-/* 收起 / 展开折叠手柄 */
-.jc-dock-toggle-btn {
-  position: absolute;
-  top: 50%;
-  left: -12px;
-  transform: translateY(-50%);
-  width: 14px;
-  height: 36px;
-  border: 1px solid rgba(0, 0, 0, 0.08);
-  border-right: none;
-  border-radius: 8px 0 0 8px;
-  background: rgba(255, 255, 255, 0.95);
-  box-shadow: -2px 0 6px rgba(0, 0, 0, 0.05);
-  cursor: pointer;
+.jc-pill-info {
   display: flex;
   align-items: center;
-  justify-content: center;
-  padding: 0;
-  color: #86909c;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 500;
+  color: #1d2129;
+}
+
+.jc-pill-logo-wrap img {
+  display: block;
+}
+
+.jc-pill-info .jc-count-number {
+  color: #1e80ff;
+  font-weight: 700;
+}
+
+.jc-pill-divider {
+  width: 1px;
+  height: 18px;
+  background: #e5e6eb;
+}
+
+.jc-pill-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.jc-pill-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 11px;
+  border: 1px solid #e5e6eb;
+  border-radius: 99px;
+  background: #f7f8fa;
+  color: #4e5969;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.16s ease;
+}
+
+.jc-pill-btn:hover {
+  background: #e8f3ff;
+  border-color: #bedaff;
+  color: #1e80ff;
+}
+
+.jc-pill-btn svg {
+  width: 12px;
+  height: 12px;
+}
+
+.jc-pill-primary-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 18px;
+  border: none;
+  border-radius: 99px;
+  background: linear-gradient(135deg, #1e80ff 0%, #0066ee 100%);
+  color: #ffffff;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: 0 3px 10px rgba(30, 128, 255, 0.32);
   transition: all 0.18s ease;
 }
 
-.jc-dock-toggle-btn:hover {
-  background: #ffffff;
-  color: #1e80ff;
-  width: 16px;
-  left: -14px;
+.jc-pill-primary-btn:hover {
+  background: linear-gradient(135deg, #388fff 0%, #1574f5 100%);
+  box-shadow: 0 5px 16px rgba(30, 128, 255, 0.42);
+  transform: translateY(-1px);
 }
 
-.jc-dock-toggle-svg {
-  width: 10px;
-  height: 10px;
-  transition: transform 0.2s ease;
-}
-
-/* 收起状态 */
-.jc-batch-dock.is-collapsed {
-  transform: translateY(-50%) translateX(calc(100% - 14px));
-}
-
-.jc-batch-dock.is-collapsed .jc-dock-toggle-svg {
-  transform: rotate(180deg);
-}
-
-/* 兼容旧选择器与深色主题 */
-.jc-batch-action-bar:not(.jc-batch-dock) {
-  display: none;
+.jc-pill-rocket {
+  font-size: 14px;
 }
   font-size: 14px;
 }
@@ -1631,10 +1648,27 @@ body[data-theme="dark"] .jc-creator-sync[data-state="login"] {
 }
 
 /* 深色主题适配 */
-body[data-theme="dark"] .jc-batch-action-bar:not(.jc-batch-dock) {
-  background: rgba(35, 35, 40, 0.95);
+body[data-theme="dark"] .jc-batch-header-bar {
+  background: #232328;
   border-color: #383842;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+}
+body[data-theme="dark"] .jc-batch-select-all-label,
+body[data-theme="dark"] .jc-pill-info {
+  color: #e5e6eb;
+}
+body[data-theme="dark"] .jc-batch-btn,
+body[data-theme="dark"] .jc-pill-btn {
+  background: #2b2b32;
+  border-color: #383842;
+  color: #c9cdd4;
+}
+body[data-theme="dark"] .jc-batch-bottom-pill {
+  background: rgba(30, 32, 38, 0.94);
+  border-color: rgba(255, 255, 255, 0.1);
+  box-shadow: 0 12px 36px -4px rgba(0, 0, 0, 0.5);
+}
+body[data-theme="dark"] .jc-pill-divider {
+  background: #383842;
 }
 body[data-theme="dark"] .jc-batch-select-all-label,
 body[data-theme="dark"] .jc-batch-modal-title-row h3,
