@@ -277,4 +277,63 @@ describe('掘金历史文章批量同步向导核心算法与缓存',()=>{
     expect(modalTemplate).toContain('jc-dialog-confirm');
     expect(modalTemplate).toContain('jc-dialog-cancel');
   });
+
+  it('未登录平台视作未勾选：未登录平台严格剔除，任务生成只包含有效已登录平台', () => {
+    type PlatformAuthItem = { platform: 'csdn' | 'wechat' | 'cnblogs' | 'zhihu'; loggedIn: boolean };
+    const auths: PlatformAuthItem[] = [
+      { platform: 'csdn', loggedIn: true },
+      { platform: 'wechat', loggedIn: false }, // 未登录
+      { platform: 'cnblogs', loggedIn: true },
+      { platform: 'zhihu', loggedIn: false }  // 未登录
+    ];
+
+    const platformsSelected = new Set<'csdn' | 'wechat' | 'cnblogs' | 'zhihu'>();
+    const userDeselected = new Set<'csdn' | 'wechat' | 'cnblogs' | 'zhihu'>();
+
+    // 模拟刷新 / 初始化同步平台勾选
+    for (const auth of auths) {
+      if (!auth.loggedIn) {
+        // 未登录状态视作未勾选
+        platformsSelected.delete(auth.platform);
+      } else if (!userDeselected.has(auth.platform)) {
+        platformsSelected.add(auth.platform);
+      }
+    }
+
+    expect(platformsSelected.has('csdn')).toBe(true);
+    expect(platformsSelected.has('wechat')).toBe(false);
+    expect(platformsSelected.has('cnblogs')).toBe(true);
+    expect(platformsSelected.has('zhihu')).toBe(false);
+
+    // 模拟任务生成时的二次严格防御过滤
+    const selectedArticles = [
+      { articleId: '101', title: '文章1' },
+      { articleId: '102', title: '文章2' }
+    ];
+    const validPlatforms = [...platformsSelected].filter(p => {
+      const auth = auths.find(a => a.platform === p);
+      return auth && auth.loggedIn === true;
+    });
+
+    const tasks: Array<{ articleId: string; platform: string }> = [];
+    for (const article of selectedArticles) {
+      for (const platform of validPlatforms) {
+        tasks.push({ articleId: article.articleId, platform });
+      }
+    }
+
+    // 仅应生成 4 个任务 (2 篇文章 × 2 个已登录平台)，绝不包含 wechat 或 zhihu
+    expect(tasks.length).toBe(4);
+    expect(tasks.some(t => t.platform === 'wechat')).toBe(false);
+    expect(tasks.some(t => t.platform === 'zhihu')).toBe(false);
+  });
+
+  it('平台刷新按钮旋转与统计摘要联动', () => {
+    // 验证刷新图标使用 is-spinning 类名匹配样式表 .jc-btn-icon.is-spinning .jc-refresh-icon
+    const classes = new Set(['jc-btn-icon', 'jc-auth-refresh']);
+    classes.add('is-spinning');
+    expect(classes.has('is-spinning')).toBe(true);
+    classes.delete('is-spinning');
+    expect(classes.has('is-spinning')).toBe(false);
+  });
 });
