@@ -812,7 +812,7 @@ function openBatchSyncWizard(){
       <div class="jc-batch-modal-title-row">
         <img src="${chrome.runtime.getURL('logo.svg')}" width="28" height="28" alt="" aria-hidden="true" />
         <div>
-          <h3 id="jc-batch-modal-title">历史文章批量同步向导</h3>
+          <h3 id="jc-batch-modal-title">批量同步</h3>
           <p>多选文章 · 多平台防风控限速分发</p>
         </div>
       </div>
@@ -862,7 +862,7 @@ function openBatchSyncWizard(){
           <div class="jc-batch-section-title">
             <span>目标平台选择</span>
           </div>
-          <div class="jc-sync-platform-grid" id="jc-batch-platform-grid">
+          <div class="jc-platform-list jc-batch-platform-list" id="jc-batch-platform-grid">
             ${(['csdn','wechat','cnblogs','zhihu'] as PlatformId[]).map(p=>`
               <div class="jc-platform-card is-selected is-loading" data-platform="${p}">
                 <div class="jc-card-logo"><img src="${PLATFORM_META[p].logo}" alt="" class="jc-logo-img" /></div>
