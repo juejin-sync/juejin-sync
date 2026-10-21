@@ -369,9 +369,10 @@ main {
 
 /* 2. 分段滑块导航 TABS (Spring Segmented Switcher) */
 .nav-segment {
-  padding: 8px 14px 4px;
+  padding: 8px 14px 6px;
   background: var(--bg-card);
   flex-shrink: 0;
+  border-bottom: 1px solid var(--border-divider);
 }
 
 .segment-track {
@@ -1235,6 +1236,15 @@ main {
   user-select: none;
 }
 
+.setting-item.select-item {
+  cursor: default;
+}
+
+.setting-item.select-item .select-input {
+  max-width: 155px;
+  flex-shrink: 0;
+}
+
 .setting-item:not(:last-child) {
   border-bottom: 1px solid var(--border-divider);
 }
@@ -1243,6 +1253,8 @@ main {
   display: flex;
   flex-direction: column;
   gap: 2px;
+  flex: 1;
+  min-width: 0;
 }
 
 .setting-text b {
