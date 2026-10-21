@@ -696,23 +696,25 @@ function injectBatchHeaderBar(container:HTMLElement){
   const bar=document.createElement('div');
   bar.className='jc-batch-header-bar jc-batch-action-bar';
   bar.innerHTML=`
-    <div class="jc-batch-header-left">
-      <label class="jc-batch-select-all-label">
-        <input type="checkbox" class="jc-batch-select-all-checkbox" />
-        <span>全选当前页</span>
-      </label>
-      <button type="button" class="jc-batch-btn jc-batch-filter-btn" title="根据同步历史，一键勾选未同步过的文章">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>
-        <span>一键勾选未同步</span>
-      </button>
-      <span class="jc-batch-count-tag">已选 <b class="jc-count-number">${selectedArticles.size}</b> 篇</span>
-      <button type="button" class="jc-batch-clear-btn" style="${selectedArticles.size===0?'display:none;':''}">清空</button>
-    </div>
-    <div class="jc-batch-header-right">
-      <button type="button" class="jc-batch-trigger-btn" ${selectedArticles.size===0?'disabled':''}>
-        <span>批量同步向导</span>
-        <span class="jc-batch-rocket-icon">🚀</span>
-      </button>
+    <div class="jc-batch-header-inner">
+      <div class="jc-batch-header-left">
+        <label class="jc-batch-select-all-label">
+          <input type="checkbox" class="jc-batch-select-all-checkbox" />
+          <span>全选当前页</span>
+        </label>
+        <button type="button" class="jc-batch-btn jc-batch-filter-btn" title="根据同步历史，一键勾选未同步过的文章">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>
+          <span>一键勾选未同步</span>
+        </button>
+        <span class="jc-batch-count-tag">已选 <b class="jc-count-number">${selectedArticles.size}</b> 篇</span>
+        <button type="button" class="jc-batch-clear-btn" style="${selectedArticles.size===0?'display:none;':''}">清空</button>
+      </div>
+      <div class="jc-batch-header-right">
+        <button type="button" class="jc-batch-trigger-btn" ${selectedArticles.size===0?'disabled':''}>
+          <span>批量同步向导</span>
+          <span class="jc-batch-rocket-icon">🚀</span>
+        </button>
+      </div>
     </div>
   `;
 
