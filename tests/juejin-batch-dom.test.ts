@@ -79,7 +79,7 @@ describe('掘金历史文章批量同步向导核心算法与缓存',()=>{
     }
   });
 
-  it('单行弹性标题包裹结构确保复选框与标题在同一水平行内且不破坏元信息布局',()=>{
+  it('卡片行最左侧独立居中固定列确保复选框不侵入文章内部文本流且不破坏行布局',()=>{
     class MockElement {
       children: MockElement[] = [];
       parentElement: MockElement | null = null;
@@ -105,64 +105,99 @@ describe('掘金历史文章批量同步向导核心算法与缓存',()=>{
           this.children.splice(index, 1);
         }
       }
-      closest(className: string): MockElement | null {
-        let cur: MockElement | null = this;
-        while (cur) {
-          if (cur.className.includes(className.replace('.', ''))) return cur;
-          cur = cur.parentElement;
+      querySelector(selector: string): MockElement | null {
+        const targetClass = selector.replace('.', '').split('[')[0];
+        for (const child of this.children) {
+          if (child.className.includes(targetClass)) return child;
+          const found = child.querySelector(selector);
+          if (found) return found;
         }
         return null;
       }
     }
 
-    const container = new MockElement('div');
+    // 模拟掘金整行卡片 row：包含 contentCol (title + subTitle) 和 actionsCol (buttons)
+    const row = new MockElement('div');
+    row.className = 'article-item-row';
+
+    const contentCol = new MockElement('div');
+    contentCol.className = 'content-col';
     const link = new MockElement('a');
     link.className = 'title';
     const subTitle = new MockElement('div');
     subTitle.className = 'sub-title';
+    contentCol.appendChild(link);
+    contentCol.appendChild(subTitle);
 
-    container.appendChild(link);
-    container.appendChild(subTitle);
+    const actionsCol = new MockElement('div');
+    actionsCol.className = 'actions-col';
 
-    // 执行 titleRow 注入逻辑
-    let titleRow = link.closest('.jc-title-flex-row');
-    if (!titleRow) {
-      titleRow = new MockElement('div');
-      titleRow.className = 'jc-title-flex-row';
-      container.insertBefore(titleRow, link);
-      titleRow.appendChild(link);
+    row.appendChild(contentCol);
+    row.appendChild(actionsCol);
+
+    // 执行全新的独立 checkboxCol 注入逻辑
+    let checkboxCol = row.querySelector('.jc-article-checkbox-col');
+    if (!checkboxCol) {
+      checkboxCol = new MockElement('div');
+      checkboxCol.className = 'jc-article-checkbox-col';
+      const checkbox = new MockElement('input');
+      checkbox.className = 'jc-article-select-checkbox';
+      checkboxCol.appendChild(checkbox);
+      row.insertBefore(checkboxCol, row.children[0]);
     }
-    const wrap = new MockElement('div');
-    wrap.className = 'jc-article-select-wrap';
-    const checkbox = new MockElement('input');
-    checkbox.className = 'jc-article-select-checkbox';
-    wrap.appendChild(checkbox);
-    titleRow.insertBefore(wrap, link);
 
-    // 验证结构：container 拥有 titleRow 和 subTitle 两个直接子节点
-    expect(container.children.length).toBe(2);
-    expect(container.children[0]).toBe(titleRow);
-    expect(container.children[1]).toBe(subTitle);
+    // 验证行级结构：row 拥有 3 个同级子列：[0] checkboxCol, [1] contentCol, [2] actionsCol
+    expect(row.children.length).toBe(3);
+    expect(row.children[0]).toBe(checkboxCol);
+    expect(row.children[1]).toBe(contentCol);
+    expect(row.children[2]).toBe(actionsCol);
 
-    // 验证 titleRow 内部：第 1 个是 wrap，第 2 个是 link（水平同级）
-    expect(titleRow.children.length).toBe(2);
-    expect(titleRow.children[0]).toBe(wrap);
-    expect(titleRow.children[1]).toBe(link);
+    // 验证 contentCol 内部完全未受破坏（依然是纯净的 title + subTitle）
+    expect(contentCol.children.length).toBe(2);
+    expect(contentCol.children[0]).toBe(link);
+    expect(contentCol.children[1]).toBe(subTitle);
   });
 
-  it('右侧浮动操作舱全选与清空状态切换自洽',()=>{
-    const selectedArticles=new Map<string,string>();
-    const totalCount=3;
+  it('顶部内嵌操作条与底部居中浮动胶囊状态双向同步',()=>{
+    const selectedArticles = new Map<string, string>();
+
+    // 状态计算函数
+    const computeState = (selectedCount: number, totalCount: number) => ({
+      hasSelected: selectedCount > 0,
+      count: selectedCount,
+      isAll: selectedCount > 0 && selectedCount === totalCount,
+      isIndeterminate: selectedCount > 0 && selectedCount < totalCount,
+      bottomPillVisible: selectedCount > 0
+    });
 
     // 初始状态：未勾选任何文章
-    expect(selectedArticles.size).toBe(0);
+    let state = computeState(selectedArticles.size, 5);
+    expect(state.hasSelected).toBe(false);
+    expect(state.bottomPillVisible).toBe(false);
+    expect(state.isAll).toBe(false);
 
-    // 模拟全选操作
-    ['art1','art2','art3'].forEach(id=>selectedArticles.set(id,`文章${id}`));
-    expect(selectedArticles.size).toBe(totalCount);
+    // 勾选 2 篇：半选状态，底部浮动胶囊升起，不遮挡右侧操作
+    selectedArticles.set('1', '文章1');
+    selectedArticles.set('2', '文章2');
+    state = computeState(selectedArticles.size, 5);
+    expect(state.hasSelected).toBe(true);
+    expect(state.count).toBe(2);
+    expect(state.bottomPillVisible).toBe(true);
+    expect(state.isIndeterminate).toBe(true);
+    expect(state.isAll).toBe(false);
 
-    // 模拟再次点击全选按钮（反选清空）
+    // 全选当前页 5 篇
+    ['3', '4', '5'].forEach(id => selectedArticles.set(id, `文章${id}`));
+    state = computeState(selectedArticles.size, 5);
+    expect(state.count).toBe(5);
+    expect(state.isAll).toBe(true);
+    expect(state.isIndeterminate).toBe(false);
+    expect(state.bottomPillVisible).toBe(true);
+
+    // 点击清空：瞬间隐藏底部胶囊
     selectedArticles.clear();
-    expect(selectedArticles.size).toBe(0);
+    state = computeState(selectedArticles.size, 5);
+    expect(state.hasSelected).toBe(false);
+    expect(state.bottomPillVisible).toBe(false);
   });
 });
