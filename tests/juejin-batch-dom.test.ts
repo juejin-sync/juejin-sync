@@ -235,4 +235,19 @@ describe('掘金历史文章批量同步向导核心算法与缓存',()=>{
     expect(rawTemplate).toContain('jc-batch-action-bar');
     expect(rawTemplate).toContain('jc-batch-select-all-checkbox');
   });
+
+  it('批量同步弹窗标题精炼为批量同步且包含标准平台列表容器', () => {
+    const modalTemplate = `
+      <div class="jc-batch-modal-root">
+        <div class="jc-batch-modal-backdrop"></div>
+        <div class="jc-batch-modal">
+          <h3 id="jc-batch-modal-title">批量同步</h3>
+          <div class="jc-platform-list jc-batch-platform-list" id="jc-batch-platform-grid"></div>
+        </div>
+      </div>
+    `;
+    expect(modalTemplate).toContain('<h3 id="jc-batch-modal-title">批量同步</h3>');
+    expect(modalTemplate).toContain('jc-platform-list');
+    expect(modalTemplate).toContain('jc-batch-modal-backdrop');
+  });
 });

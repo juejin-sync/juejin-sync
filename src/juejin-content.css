@@ -419,10 +419,12 @@ body[data-theme="dark"] .jc-publish-login { background: rgba(30, 128, 255, 0.15)
   overflow-y: auto;
 }
 
-.jc-platform-list {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
+.jc-platform-list,
+.jc-batch-platform-list,
+.jc-sync-platform-grid {
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 10px !important;
 }
 
 /* 平台卡片 */
@@ -1348,38 +1350,48 @@ body[data-theme="dark"] .jc-creator-sync[data-state="login"] {
 .jc-pill-rocket {
   font-size: 14px;
 }
-  font-size: 14px;
-}
 
-/* 批量向导弹窗 (Modal) */
+/* 批量同步弹窗 (Modal) */
 .jc-batch-modal-root {
-  position: fixed;
-  inset: 0;
-  z-index: 10000;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  position: fixed !important;
+  top: 0 !important;
+  left: 0 !important;
+  right: 0 !important;
+  bottom: 0 !important;
+  width: 100vw !important;
+  height: 100vh !important;
+  z-index: 999999 !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  pointer-events: auto !important;
 }
 .jc-batch-modal-backdrop {
-  position: absolute;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.55);
-  backdrop-filter: blur(4px);
-  -webkit-backdrop-filter: blur(4px);
+  position: fixed !important;
+  top: 0 !important;
+  left: 0 !important;
+  right: 0 !important;
+  bottom: 0 !important;
+  width: 100vw !important;
+  height: 100vh !important;
+  background: rgba(0, 0, 0, 0.55) !important;
+  backdrop-filter: blur(4px) !important;
+  -webkit-backdrop-filter: blur(4px) !important;
   animation: jc-fade-in .2s ease forwards;
+  z-index: 1 !important;
 }
 .jc-batch-modal {
-  position: relative;
-  z-index: 1;
-  width: 90vw;
-  max-width: 680px;
-  max-height: 88vh;
-  display: flex;
-  flex-direction: column;
-  background: #ffffff;
-  border-radius: 12px;
-  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.18);
-  overflow: hidden;
+  position: relative !important;
+  z-index: 2 !important;
+  width: 90vw !important;
+  max-width: 680px !important;
+  max-height: 88vh !important;
+  display: flex !important;
+  flex-direction: column !important;
+  background: #ffffff !important;
+  border-radius: 12px !important;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.18) !important;
+  overflow: hidden !important;
   animation: jc-slide-up .25s cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }
 .jc-batch-modal-header {
