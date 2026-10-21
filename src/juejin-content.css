@@ -1098,31 +1098,36 @@ body[data-theme="dark"] .jc-creator-sync[data-state="login"] {
   margin-top: -2px;
 }
 
-/* 2. 顶部精炼操作条 (Natural Header Bar，杜绝任何浮动遮挡) */
+/* 2. 顶部原生列表表头操作栏 (Table Header Bar，无左右突兀边框，浑然天成) */
 .jc-batch-header-bar,
 .jc-batch-action-bar {
-  display: block !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
   box-sizing: border-box !important;
   width: 100% !important;
-  padding: 0 !important;
-  margin: 10px 0 14px 0 !important;
-  background: transparent !important;
-  border: none !important;
+  padding: 10px 20px !important;
+  margin: 0 !important;
+  background: #f7f8fa !important;
+  border-top: none !important;
+  border-left: none !important;
+  border-right: none !important;
+  border-bottom: 1px solid #e5e6eb !important;
+  border-radius: 0 !important;
   user-select: none;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, PingFang SC, sans-serif;
+  transition: background 0.2s ease;
 }
 
 .jc-batch-header-inner {
   display: flex !important;
   align-items: center !important;
   justify-content: space-between !important;
-  padding: 8px 20px !important;
-  background: #f7f8fa !important;
-  border: 1px solid #e5e6eb !important;
-  border-radius: 8px !important;
-  box-sizing: border-box !important;
   width: 100% !important;
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, PingFang SC, sans-serif;
-  transition: all 0.2s ease;
+  padding: 0 !important;
+  background: transparent !important;
+  border: none !important;
+  box-sizing: border-box !important;
 }
 
 .jc-batch-header-left {
@@ -1673,12 +1678,8 @@ body[data-theme="dark"] .jc-creator-sync[data-state="login"] {
 /* 深色主题适配 */
 body[data-theme="dark"] .jc-batch-header-bar,
 body[data-theme="dark"] .jc-batch-action-bar {
-  background: transparent !important;
-  border: none !important;
-}
-body[data-theme="dark"] .jc-batch-header-inner {
-  background: #232328;
-  border-color: #383842;
+  background: #232328 !important;
+  border-bottom-color: #383842 !important;
 }
 body[data-theme="dark"] .jc-batch-select-all-label,
 body[data-theme="dark"] .jc-pill-info {
