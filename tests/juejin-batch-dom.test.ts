@@ -79,24 +79,18 @@ describe('掘金历史文章批量同步向导核心算法与缓存',()=>{
     }
   });
 
-  it('卡片行最左侧独立居中固定列确保复选框不侵入文章内部文本流且不破坏行布局',()=>{
+  it('把勾选框直接放到 essay-list 下且阻止冒泡，内容区封装为 jc-essay-content',()=>{
     class MockElement {
       children: MockElement[] = [];
       parentElement: MockElement | null = null;
       className = '';
       tagName = 'div';
+      listeners: Record<string, Function[]> = {};
       constructor(tagName = 'div') { this.tagName = tagName; }
       appendChild(child: MockElement) {
         if (child.parentElement) child.parentElement.removeChild(child);
         child.parentElement = this;
         this.children.push(child);
-      }
-      insertBefore(newChild: MockElement, refChild: MockElement) {
-        if (newChild.parentElement) newChild.parentElement.removeChild(newChild);
-        const index = this.children.indexOf(refChild);
-        newChild.parentElement = this;
-        if (index === -1) this.children.push(newChild);
-        else this.children.splice(index, 0, newChild);
       }
       removeChild(child: MockElement) {
         const index = this.children.indexOf(child);
@@ -106,7 +100,7 @@ describe('掘金历史文章批量同步向导核心算法与缓存',()=>{
         }
       }
       querySelector(selector: string): MockElement | null {
-        const targetClass = selector.replace('.', '').split('[')[0];
+        const targetClass = selector.replace(':scope > ', '').replace('.', '').split('[')[0];
         for (const child of this.children) {
           if (child.className.includes(targetClass)) return child;
           const found = child.querySelector(selector);
@@ -114,48 +108,68 @@ describe('掘金历史文章批量同步向导核心算法与缓存',()=>{
         }
         return null;
       }
+      addEventListener(type: string, fn: Function) {
+        if (!this.listeners[type]) this.listeners[type] = [];
+        this.listeners[type].push(fn);
+      }
+      dispatchEvent(event: { type: string; stopPropagation: Function }) {
+        this.listeners[event.type]?.forEach(fn => fn(event));
+      }
     }
 
-    // 模拟掘金整行卡片 row：包含 contentCol (title + subTitle) 和 actionsCol (buttons)
-    const row = new MockElement('div');
-    row.className = 'article-item-row';
+    // 模拟掘金原生 .essay-list：包含 .first-line 和 .infos
+    const essayRow = new MockElement('div');
+    essayRow.className = 'essay-list';
 
-    const contentCol = new MockElement('div');
-    contentCol.className = 'content-col';
-    const link = new MockElement('a');
-    link.className = 'title';
-    const subTitle = new MockElement('div');
-    subTitle.className = 'sub-title';
-    contentCol.appendChild(link);
-    contentCol.appendChild(subTitle);
+    const firstLine = new MockElement('div');
+    firstLine.className = 'first-line';
+    const title = new MockElement('span');
+    title.className = 'title';
+    firstLine.appendChild(title);
 
-    const actionsCol = new MockElement('div');
-    actionsCol.className = 'actions-col';
+    const infos = new MockElement('div');
+    infos.className = 'infos';
 
-    row.appendChild(contentCol);
-    row.appendChild(actionsCol);
+    essayRow.appendChild(firstLine);
+    essayRow.appendChild(infos);
 
-    // 执行全新的独立 checkboxCol 注入逻辑
-    let checkboxCol = row.querySelector('.jc-article-checkbox-col');
-    if (!checkboxCol) {
-      checkboxCol = new MockElement('div');
-      checkboxCol.className = 'jc-article-checkbox-col';
+    // 执行用户的 essay-list 结构重塑逻辑
+    let contentWrap = essayRow.querySelector('.jc-essay-content');
+    if (!contentWrap) {
+      contentWrap = new MockElement('div');
+      contentWrap.className = 'jc-essay-content';
+      const existingChildren = [...essayRow.children];
+      for (const child of existingChildren) {
+        contentWrap.appendChild(child);
+      }
+
+      const wrap = new MockElement('div');
+      wrap.className = 'jc-article-select-wrap';
       const checkbox = new MockElement('input');
       checkbox.className = 'jc-article-select-checkbox';
-      checkboxCol.appendChild(checkbox);
-      row.insertBefore(checkboxCol, row.children[0]);
+
+      let stopped = false;
+      checkbox.addEventListener('click', (e: any) => { e.stopPropagation(); });
+      wrap.appendChild(checkbox);
+
+      essayRow.appendChild(wrap);
+      essayRow.appendChild(contentWrap);
+
+      // 测试点击冒泡拦截
+      const mockEvent = { type: 'click', stopPropagation: () => { stopped = true; } };
+      checkbox.dispatchEvent(mockEvent);
+      expect(stopped).toBe(true);
     }
 
-    // 验证行级结构：row 拥有 3 个同级子列：[0] checkboxCol, [1] contentCol, [2] actionsCol
-    expect(row.children.length).toBe(3);
-    expect(row.children[0]).toBe(checkboxCol);
-    expect(row.children[1]).toBe(contentCol);
-    expect(row.children[2]).toBe(actionsCol);
+    // 验证 essay-list 直接子节点是 [wrap, contentWrap]
+    expect(essayRow.children.length).toBe(2);
+    expect(essayRow.children[0].className).toBe('jc-article-select-wrap');
+    expect(essayRow.children[1].className).toBe('jc-essay-content');
 
-    // 验证 contentCol 内部完全未受破坏（依然是纯净的 title + subTitle）
-    expect(contentCol.children.length).toBe(2);
-    expect(contentCol.children[0]).toBe(link);
-    expect(contentCol.children[1]).toBe(subTitle);
+    // 验证 contentWrap 包含原生的 first-line 和 infos
+    expect(contentWrap.children.length).toBe(2);
+    expect(contentWrap.children[0]).toBe(firstLine);
+    expect(contentWrap.children[1]).toBe(infos);
   });
 
   it('顶部内嵌操作条与底部居中浮动胶囊状态双向同步',()=>{

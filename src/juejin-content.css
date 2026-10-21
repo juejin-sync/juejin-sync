@@ -1038,15 +1038,24 @@ body[data-theme="dark"] .jc-creator-sync[data-state="login"] {
    文章列表多选与批量操作栏 (Header Toolbar & Bottom Floating Capsule)
    ========================================================================== */
 
-/* 1. 卡片行最左侧独立居中勾选列（严禁破坏卡片内文本排版） */
-.jc-article-checkbox-col {
+/* 1. 掘金文章项 .essay-list 弹性基线排版与勾选包裹 */
+.essay-list {
   display: flex !important;
+  align-items: baseline !important;
+  gap: 16px !important;
+}
+
+.jc-essay-content {
+  flex: 1 !important;
+  min-width: 0 !important;
+}
+
+.jc-article-select-wrap {
+  display: inline-flex !important;
   align-items: center !important;
   justify-content: center !important;
-  flex: 0 0 28px !important;
-  width: 28px !important;
-  margin-right: 12px !important;
-  align-self: center !important;
+  flex: 0 0 auto !important;
+  vertical-align: baseline !important;
 }
 
 .jc-article-select-checkbox {

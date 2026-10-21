@@ -1196,47 +1196,63 @@ function injectCreatorCenterSync(){
 
     if(!firstRow&&row)firstRow=row;
 
-    // 1. 注入行级 Checkbox 作为每行卡片最左侧独立的垂直居中固定列
-    if(row){
-      // 清理历史残留
-      row.querySelectorAll('.jc-article-select-wrap, .jc-title-flex-row').forEach(el=>{
-        if(el.classList.contains('jc-title-flex-row')){
-          const innerLink=el.querySelector('a');
-          if(innerLink)el.parentElement?.insertBefore(innerLink,el);
-          el.remove();
-        }else{
-          el.remove();
+    // 1. 注入行级 Checkbox 直接置于 .essay-list 下，并阻止冒泡
+    const essayRow = dropdown.closest<HTMLElement>('.essay-list') || row;
+    if(essayRow){
+      let contentWrap = essayRow.querySelector<HTMLElement>(':scope > .jc-essay-content');
+      if(!contentWrap){
+        contentWrap = document.createElement('div');
+        contentWrap.className = 'jc-essay-content';
+        const children = [...essayRow.childNodes];
+        for(const child of children){
+          if(child instanceof HTMLElement && (child.classList.contains('jc-article-select-wrap') || child.classList.contains('jc-article-checkbox-col'))){
+            child.remove();
+            continue;
+          }
+          contentWrap.appendChild(child);
         }
-      });
 
-      let checkboxCol=row.querySelector<HTMLElement>(':scope > .jc-article-checkbox-col');
-      if(!checkboxCol){
-        checkboxCol=document.createElement('div');
-        checkboxCol.className='jc-article-checkbox-col';
-        const checkbox=document.createElement('input');
-        checkbox.type='checkbox';
-        checkbox.className='jc-article-select-checkbox';
-        checkbox.dataset.articleId=articleId;
-        checkbox.dataset.title=title;
-        checkbox.checked=selectedArticles.has(articleId);
-        checkbox.addEventListener('change',()=>{
-          if(checkbox.checked){
-            selectedArticles.set(articleId,{articleId,title});
-          }else{
+        const wrap = document.createElement('div');
+        wrap.className = 'jc-article-select-wrap';
+        const checkbox = document.createElement('input');
+        checkbox.type = 'checkbox';
+        checkbox.className = 'jc-article-select-checkbox';
+        checkbox.dataset.articleId = articleId;
+        checkbox.dataset.title = title;
+        checkbox.checked = selectedArticles.has(articleId);
+
+        // 阻止勾选冒泡
+        checkbox.addEventListener('click', (e) => e.stopPropagation());
+        checkbox.addEventListener('change', (e) => {
+          e.stopPropagation();
+          if (checkbox.checked) {
+            selectedArticles.set(articleId, { articleId, title });
+          } else {
             selectedArticles.delete(articleId);
           }
           updateBatchBarState();
         });
-        checkboxCol.appendChild(checkbox);
-        row.insertBefore(checkboxCol,row.firstElementChild);
+        wrap.addEventListener('click', (e) => e.stopPropagation());
+        wrap.appendChild(checkbox);
+
+        essayRow.appendChild(wrap);
+        essayRow.appendChild(contentWrap);
       }else{
-        const cb=checkboxCol.querySelector<HTMLInputElement>('.jc-article-select-checkbox');
+        const cb = essayRow.querySelector<HTMLInputElement>('.jc-article-select-checkbox');
         if(cb){
-          cb.dataset.articleId=articleId;
-          cb.dataset.title=title;
-          cb.checked=selectedArticles.has(articleId);
+          cb.dataset.articleId = articleId;
+          cb.dataset.title = title;
+          cb.checked = selectedArticles.has(articleId);
         }
       }
+
+      // 阻止 a 标签及标题点击冒泡
+      essayRow.querySelectorAll('a, .title').forEach(el => {
+        if (!(el as any)._jcStopBubble) {
+          (el as any)._jcStopBubble = true;
+          el.addEventListener('click', (e) => e.stopPropagation());
+        }
+      });
     }
 
     // 2. 注入单篇“同步多平台”按钮
