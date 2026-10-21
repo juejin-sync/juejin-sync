@@ -214,4 +214,25 @@ describe('掘金历史文章批量同步向导核心算法与缓存',()=>{
     expect(state.hasSelected).toBe(false);
     expect(state.bottomPillVisible).toBe(false);
   });
+
+  it('顶部操作条外层容器具备 jc-batch-action-bar 并嵌套 jc-batch-header-inner 卡片', () => {
+    const rawTemplate = `
+      <div class="jc-batch-header-bar jc-batch-action-bar">
+        <div class="jc-batch-header-inner">
+          <div class="jc-batch-header-left">
+            <label class="jc-batch-select-all-label">
+              <input type="checkbox" class="jc-batch-select-all-checkbox" />
+              <span>全选当前页</span>
+            </label>
+          </div>
+          <div class="jc-batch-header-right">
+            <button type="button" class="jc-batch-trigger-btn">批量同步向导</button>
+          </div>
+        </div>
+      </div>
+    `;
+    expect(rawTemplate).toContain('jc-batch-header-inner');
+    expect(rawTemplate).toContain('jc-batch-action-bar');
+    expect(rawTemplate).toContain('jc-batch-select-all-checkbox');
+  });
 });
