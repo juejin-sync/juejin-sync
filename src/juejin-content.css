@@ -1246,7 +1246,7 @@ body[data-theme="dark"] .jc-creator-sync[data-state="login"] {
 /* 3. 底部居中高质感浮动胶囊 (Bottom-Center Floating Capsule，杜绝遮挡右侧按钮) */
 .jc-batch-bottom-pill {
   position: fixed;
-  bottom: 28px;
+  bottom: 1.66rem !important;
   left: 50%;
   transform: translateX(-50%) translateY(80px);
   opacity: 0;
@@ -1386,41 +1386,10 @@ body[data-theme="dark"] .jc-creator-sync[data-state="login"] {
   z-index: 1 !important;
 }
 .jc-batch-modal {
-  position: relative !important;
-  z-index: 2 !important;
-  width: 90vw !important;
-  max-width: 680px !important;
-  max-height: 88vh !important;
-  display: flex !important;
-  flex-direction: column !important;
-  background: #ffffff !important;
-  border-radius: 12px !important;
-  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.18) !important;
-  overflow: hidden !important;
-  animation: jc-slide-up .25s cubic-bezier(0.16, 1, 0.3, 1) forwards;
-}
-.jc-batch-modal-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 16px 20px;
-  border-bottom: 1px solid #f0f2f5;
-}
-.jc-batch-modal-title-row {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-.jc-batch-modal-title-row h3 {
-  margin: 0;
-  font-size: 16px;
-  font-weight: 600;
-  color: #1d2129;
-}
-.jc-batch-modal-title-row p {
-  margin: 2px 0 0 0;
-  font-size: 12px;
-  color: #86909c;
+  width: min(520px, calc(100vw - 32px)) !important;
+  max-width: 520px !important;
+  max-height: calc(100vh - 40px) !important;
+  border-radius: 20px !important;
 }
 .jc-batch-modal-body {
   flex: 1 1 auto;
@@ -1521,38 +1490,6 @@ body[data-theme="dark"] .jc-creator-sync[data-state="login"] {
 .jc-batch-article-remove:hover {
   color: #f53f3f;
   background: #ffece8;
-}
-
-/* 风控与耗时预估卡片 */
-.jc-batch-estimate-card {
-  display: flex;
-  align-items: flex-start;
-  gap: 12px;
-  padding: 12px 14px;
-  border-radius: 6px;
-  background: #f0f7ff;
-  border: 1px solid #bedaff;
-  color: #1e80ff;
-  font-size: 12.5px;
-  line-height: 1.5;
-}
-.jc-batch-estimate-card svg {
-  flex: 0 0 auto;
-  margin-top: 1px;
-}
-.jc-batch-estimate-card b {
-  color: #0066ee;
-}
-
-/* 弹窗底部操作条 */
-.jc-batch-modal-footer {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 12px;
-  padding: 14px 20px;
-  border-top: 1px solid #f0f2f5;
-  background: #fafbfc;
 }
 
 /* 看板执行视图 (Execution Dashboard) */
@@ -1716,11 +1653,6 @@ body[data-theme="dark"] .jc-batch-modal {
   background: #1f1f24;
   box-shadow: 0 16px 40px rgba(0, 0, 0, 0.45);
 }
-body[data-theme="dark"] .jc-batch-modal-header,
-body[data-theme="dark"] .jc-batch-modal-footer {
-  background: #19191d;
-  border-color: #2c2c34;
-}
 body[data-theme="dark"] .jc-batch-article-list,
 body[data-theme="dark"] .jc-batch-log-list {
   background: #19191d;
@@ -1729,10 +1661,5 @@ body[data-theme="dark"] .jc-batch-log-list {
 body[data-theme="dark"] .jc-batch-article-item,
 body[data-theme="dark"] .jc-batch-log-item {
   border-color: #2c2c34;
-}
-body[data-theme="dark"] .jc-batch-estimate-card {
-  background: #162438;
-  border-color: #1e3a63;
-  color: #68aeff;
 }
 
