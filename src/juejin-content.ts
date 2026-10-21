@@ -3,6 +3,7 @@ import type {Article,PlatformId,SyncTask} from './types';
 import {extractArticleId} from './source/juejin-api';
 import {CNBLOGS_LOGO,CSDN_LOGO,WECHAT_LOGO,ZHIHU_LOGO} from './targets/logos';
 import {refreshPlatformSelection,syncReplyState} from './core/sync-dialog';
+import {BatchSyncQueue,type BatchTaskItem,type BatchStats} from './core/batch-queue';
 
 type EditorSnapshot={title:string;markdown:string;draftId:string;sourceUrl:string;tags?:string[];cover?:string;summary?:string};
 type PlatformAuth={platform:PlatformId;name:string;ok:boolean;loggedIn:boolean;loading?:boolean;account?:string;accountId?:string;message?:string};
@@ -25,6 +26,8 @@ let currentPublishRefresh:(()=>Promise<void>)|null=null;
 let publishPanel:HTMLElement|null=null;
 let publishSelected=new Set<PlatformId>();
 let publishAuths:PlatformAuth[]=[];
+const selectedArticles=new Map<string,{articleId:string;title:string}>();
+let currentBatchQueue:BatchSyncQueue|null=null;
 // 请求快照独立于面板生命周期；关闭面板不会丢失已提交的同步意图。
 type PendingPublish={article?:Article;error?:string;platforms:PlatformId[];auths:PlatformAuth[];panel:HTMLElement|null;selection:Set<PlatformId>};
 const pendingPublishes=new Map<string,PendingPublish>();
@@ -52,7 +55,14 @@ function teardownContentScript(){
   document.removeEventListener(PUBLISH_START_EVENT,handleJuejinPublishStart);
   try{chrome.runtime.onMessage.removeListener(onRuntimeMessage);}catch{}
   pendingPublishes.clear();
+  selectedArticles.clear();
+  if(currentBatchQueue){
+    currentBatchQueue.stop();
+    currentBatchQueue=null;
+  }
   document.querySelector('.jc-sync-dialog-root')?.remove();
+  document.querySelector('.jc-batch-modal-root')?.remove();
+  document.querySelector('.jc-batch-action-bar')?.remove();
 }
 
 async function safeSendMessage<T=any>(message:any):Promise<T|undefined>{
@@ -615,11 +625,484 @@ function injectHistoryMenus(){
   });
 }
 
+function updateBatchActionBarState(){
+  const bar=document.querySelector<HTMLElement>('.jc-batch-action-bar');
+  if(!bar)return;
+  const countSpan=bar.querySelector<HTMLElement>('.jc-count-number');
+  if(countSpan)countSpan.textContent=String(selectedArticles.size);
+  const triggerBtn=bar.querySelector<HTMLButtonElement>('.jc-batch-trigger-btn');
+  if(triggerBtn){
+    triggerBtn.disabled=selectedArticles.size===0;
+  }
+  const selectAllCheckbox=bar.querySelector<HTMLInputElement>('.jc-batch-select-all-checkbox');
+  const allRowCheckboxes=document.querySelectorAll<HTMLInputElement>('.jc-article-select-checkbox');
+  if(selectAllCheckbox&&allRowCheckboxes.length>0){
+    const checkedCount=[...allRowCheckboxes].filter(cb=>cb.checked).length;
+    selectAllCheckbox.checked=checkedCount===allRowCheckboxes.length;
+    selectAllCheckbox.indeterminate=checkedCount>0&&checkedCount<allRowCheckboxes.length;
+  }
+}
+
+async function filterUnsyncedArticles(){
+  if(!isExtensionAlive()){
+    teardownContentScript();
+    return;
+  }
+  const ids=await syncedArticleIds();
+  const checkboxes=document.querySelectorAll<HTMLInputElement>('.jc-article-select-checkbox');
+  checkboxes.forEach(cb=>{
+    const articleId=cb.dataset.articleId||'';
+    const title=cb.dataset.title||'';
+    if(!articleId)return;
+    const isSynced=ids.has(`csdn:${articleId}`)&&ids.has(`wechat:${articleId}`)&&ids.has(`cnblogs:${articleId}`)&&ids.has(`zhihu:${articleId}`);
+    if(!isSynced){
+      cb.checked=true;
+      selectedArticles.set(articleId,{articleId,title});
+    }else{
+      cb.checked=false;
+      selectedArticles.delete(articleId);
+    }
+  });
+  updateBatchActionBarState();
+}
+
+function injectBatchActionBar(container:HTMLElement){
+  if(document.querySelector('.jc-batch-action-bar'))return;
+  const bar=document.createElement('div');
+  bar.className='jc-batch-action-bar';
+  bar.innerHTML=`<div class="jc-batch-bar-left">
+    <label class="jc-batch-select-all-label">
+      <input type="checkbox" class="jc-batch-select-all-checkbox" />
+      <span>全选当前页</span>
+    </label>
+    <button type="button" class="jc-batch-filter-unsynced-btn" title="根据同步历史，自动勾选未同步过目标平台的文章">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>
+      <span>一键勾选未同步文章</span>
+    </button>
+    <span class="jc-batch-selected-count">已选 <b class="jc-count-number">${selectedArticles.size}</b> 篇</span>
+  </div>
+  <div class="jc-batch-bar-right">
+    <button type="button" class="jc-batch-trigger-btn" ${selectedArticles.size===0?'disabled':''}>
+      <span>批量同步向导</span>
+      <span class="jc-batch-rocket-icon">🚀</span>
+    </button>
+  </div>`;
+
+  const selectAllCb=bar.querySelector<HTMLInputElement>('.jc-batch-select-all-checkbox');
+  selectAllCb?.addEventListener('change',()=>{
+    const checked=selectAllCb.checked;
+    const checkboxes=document.querySelectorAll<HTMLInputElement>('.jc-article-select-checkbox');
+    checkboxes.forEach(cb=>{
+      cb.checked=checked;
+      const articleId=cb.dataset.articleId||'';
+      const title=cb.dataset.title||'';
+      if(checked){
+        if(articleId)selectedArticles.set(articleId,{articleId,title});
+      }else{
+        if(articleId)selectedArticles.delete(articleId);
+      }
+    });
+    updateBatchActionBarState();
+  });
+
+  bar.querySelector('.jc-batch-filter-unsynced-btn')?.addEventListener('click',()=>{
+    void filterUnsyncedArticles();
+  });
+
+  bar.querySelector('.jc-batch-trigger-btn')?.addEventListener('click',()=>{
+    if(selectedArticles.size>0){
+      openBatchSyncWizard();
+    }
+  });
+
+  container.parentElement?.insertBefore(bar,container);
+}
+
+function openBatchSyncWizard(){
+  document.querySelector('.jc-batch-modal-root')?.remove();
+  const root=document.createElement('div');
+  root.className='jc-batch-modal-root';
+
+  const selectedList=[...selectedArticles.values()];
+  const platformsSelected=new Set<PlatformId>(['csdn','wechat','cnblogs','zhihu']);
+  let modalAuths:PlatformAuth[]=[];
+
+  root.innerHTML=`<div class="jc-batch-modal-backdrop"></div>
+  <div class="jc-batch-modal" role="dialog" aria-modal="true" aria-labelledby="jc-batch-modal-title">
+    <div class="jc-batch-modal-header">
+      <div class="jc-batch-modal-title-row">
+        <img src="${chrome.runtime.getURL('logo.svg')}" width="28" height="28" alt="" aria-hidden="true" />
+        <div>
+          <h3 id="jc-batch-modal-title">历史文章批量同步向导</h3>
+          <p>多选文章 · 多平台防风控限速分发</p>
+        </div>
+      </div>
+      <button class="jc-btn-icon jc-dialog-close" type="button" title="关闭弹窗" aria-label="关闭弹窗">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+      </button>
+    </div>
+
+    <div class="jc-batch-modal-body">
+      <!-- 步骤指示器 -->
+      <div class="jc-batch-steps">
+        <div class="jc-batch-step is-active" data-step="1">
+          <span class="jc-batch-step-num">1</span>
+          <span>勾选清单确认</span>
+        </div>
+        <div class="jc-batch-step-line"></div>
+        <div class="jc-batch-step is-active" data-step="2">
+          <span class="jc-batch-step-num">2</span>
+          <span>目标平台选择</span>
+        </div>
+        <div class="jc-batch-step-line"></div>
+        <div class="jc-batch-step is-active" data-step="3">
+          <span class="jc-batch-step-num">3</span>
+          <span>耗时与风控预估</span>
+        </div>
+      </div>
+
+      <!-- 配置视图 (Config View) -->
+      <div class="jc-batch-view-config">
+        <!-- 1. 清单确认 -->
+        <div class="jc-batch-section">
+          <div class="jc-batch-section-title">
+            <span>待同步文章清单 (<span class="jc-batch-list-count">${selectedList.length}</span> 篇)</span>
+          </div>
+          <div class="jc-batch-article-list">
+            ${selectedList.map(a=>`
+              <div class="jc-batch-article-item" data-id="${a.articleId}">
+                <span class="jc-item-title" title="${escapeHtml(a.title)}">${escapeHtml(a.title)}</span>
+                <button type="button" class="jc-batch-article-remove" data-id="${a.articleId}" title="从本次批量同步中移除">✕</button>
+              </div>
+            `).join('')}
+          </div>
+        </div>
+
+        <!-- 2. 目标平台选择 -->
+        <div class="jc-batch-section">
+          <div class="jc-batch-section-title">
+            <span>目标平台选择</span>
+          </div>
+          <div class="jc-sync-platform-grid" id="jc-batch-platform-grid">
+            ${(['csdn','wechat','cnblogs','zhihu'] as PlatformId[]).map(p=>`
+              <div class="jc-platform-card is-selected is-loading" data-platform="${p}">
+                <div class="jc-card-logo"><img src="${PLATFORM_META[p].logo}" alt="" class="jc-logo-img" /></div>
+                <div class="jc-card-content">
+                  <div class="jc-card-header-row"><b class="jc-card-title">${PLATFORM_META[p].name}</b><span class="jc-card-badge">${PLATFORM_META[p].badge}</span></div>
+                  <div class="jc-card-meta-row"><span class="jc-card-status is-checking"><span class="jc-status-spinner"></span><span>检测登录状态…</span></span></div>
+                </div>
+                <div class="jc-card-control">
+                  <div class="jc-custom-checkbox is-checked"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><polyline points="3 8.5 6.5 12 13 4" /></svg></div>
+                </div>
+              </div>
+            `).join('')}
+          </div>
+        </div>
+
+        <!-- 3. 耗时预估与风控提示 -->
+        <div class="jc-batch-section">
+          <div class="jc-batch-estimate-card">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
+            <div>
+              <div class="jc-estimate-summary">
+                已选 <b id="jc-est-articles">${selectedList.length}</b> 篇文章 × <b id="jc-est-platforms">${platformsSelected.size}</b> 个平台 = <b id="jc-est-tasks">${selectedList.length*platformsSelected.size}</b> 个同步任务，预计耗时约 <b id="jc-est-duration">${Math.max(3,Math.ceil((selectedList.length*platformsSelected.size/2)*2.5))}</b> 秒。
+              </div>
+              <div style="font-size:11.5px;color:#4e5969;margin-top:4px;">
+                🛡️ 已启用稳健防风控限速队列（并发上限 2，任务间注入 1.0~2.5s 动态随机抖动延迟，保障账号安全）。
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 执行看板视图 (Execution View) -->
+      <div class="jc-batch-view-exec" style="display:none;">
+        <div class="jc-batch-exec-header">
+          <div class="jc-batch-progress-bar-wrap">
+            <div class="jc-batch-progress-bar-fill" id="jc-batch-progress-fill"></div>
+          </div>
+          <div class="jc-batch-progress-stat">
+            <span id="jc-batch-stat-text">准备执行批量同步…</span>
+            <span id="jc-batch-stat-counts">已完成 0 / 0</span>
+          </div>
+        </div>
+
+        <div class="jc-batch-controls">
+          <button type="button" class="jc-batch-btn-outline" id="jc-batch-pause-btn">
+            <span>⏸ 暂停队列</span>
+          </button>
+          <button type="button" class="jc-batch-btn-outline is-danger" id="jc-batch-stop-btn">
+            <span>⏹ 终止批次</span>
+          </button>
+          <button type="button" class="jc-batch-btn-outline" id="jc-batch-retry-btn" style="display:none;">
+            <span>🔄 重试失败项</span>
+          </button>
+        </div>
+
+        <div class="jc-batch-log-list" id="jc-batch-log-list"></div>
+      </div>
+    </div>
+
+    <div class="jc-batch-modal-footer">
+      <button type="button" class="jc-dialog-secondary-btn jc-batch-cancel-btn">取消</button>
+      <button type="button" class="jc-dialog-confirm-btn jc-batch-start-btn" ${selectedList.length===0||platformsSelected.size===0?'disabled':''}>
+        <span>开始批量同步 🚀</span>
+      </button>
+    </div>
+  </div>`;
+
+  document.body.appendChild(root);
+
+  const closeDialog=()=>{
+    if(currentBatchQueue){
+      const stats=currentBatchQueue.getStats();
+      if(stats.state==='running'||stats.state==='paused'){
+        if(!confirm('批量同步仍在进行中，确定要关闭窗口并终止批次吗？'))return;
+        currentBatchQueue.stop();
+        currentBatchQueue=null;
+      }
+    }
+    root.remove();
+  };
+
+  root.querySelector('.jc-batch-modal-backdrop')?.addEventListener('click',closeDialog);
+  root.querySelector('.jc-dialog-close')?.addEventListener('click',closeDialog);
+  root.querySelector('.jc-batch-cancel-btn')?.addEventListener('click',closeDialog);
+
+  const updateEstimate=()=>{
+    const articlesCount=selectedList.length;
+    const platformsCount=platformsSelected.size;
+    const taskCount=articlesCount*platformsCount;
+    const estDuration=Math.max(3,Math.ceil((taskCount/2)*2.5));
+
+    const estArticles=root.querySelector('#jc-est-articles');
+    if(estArticles)estArticles.textContent=String(articlesCount);
+    const estPlatforms=root.querySelector('#jc-est-platforms');
+    if(estPlatforms)estPlatforms.textContent=String(platformsCount);
+    const estTasks=root.querySelector('#jc-est-tasks');
+    if(estTasks)estTasks.textContent=String(taskCount);
+    const estDurationEl=root.querySelector('#jc-est-duration');
+    if(estDurationEl)estDurationEl.textContent=String(estDuration);
+
+    const startBtn=root.querySelector<HTMLButtonElement>('.jc-batch-start-btn');
+    if(startBtn)startBtn.disabled=articlesCount===0||platformsCount===0;
+  };
+
+  // 绑定清单移除事件
+  root.querySelectorAll('.jc-batch-article-remove').forEach(btn=>{
+    btn.addEventListener('click',e=>{
+      e.stopPropagation();
+      const articleId=(btn as HTMLElement).dataset.id;
+      if(!articleId)return;
+      const idx=selectedList.findIndex(a=>a.articleId===articleId);
+      if(idx>=0)selectedList.splice(idx,1);
+      selectedArticles.delete(articleId);
+      btn.closest('.jc-batch-article-item')?.remove();
+      const countEl=root.querySelector('.jc-batch-list-count');
+      if(countEl)countEl.textContent=String(selectedList.length);
+      const rowCb=document.querySelector<HTMLInputElement>(`.jc-article-select-checkbox[data-article-id="${articleId}"]`);
+      if(rowCb)rowCb.checked=false;
+      updateBatchActionBarState();
+      updateEstimate();
+    });
+  });
+
+  // 刷新平台登录态
+  const refreshPlatformCards=async()=>{
+    try{
+      const fresh=await Promise.all((['csdn','wechat','cnblogs','zhihu'] as PlatformId[]).map(checkPlatform));
+      modalAuths=fresh;
+      const grid=root.querySelector('#jc-batch-platform-grid');
+      if(!grid)return;
+      grid.innerHTML=fresh.map(auth=>platformCard(auth,platformsSelected.has(auth.platform))).join('');
+
+      // 绑定平台卡片点击切换与去登录
+      grid.querySelectorAll<HTMLElement>('.jc-platform-card').forEach(card=>{
+        const platform=card.dataset.platform as PlatformId;
+        const auth=modalAuths.find(a=>a.platform===platform);
+        card.addEventListener('click',event=>{
+          const target=event.target as HTMLElement;
+          if(target.closest('.jc-login-action-btn')||!auth?.loggedIn){
+            event.preventDefault();
+            void safeSendMessage({type:PLATFORM_META[platform].login});
+            return;
+          }
+          if(platformsSelected.has(platform)){
+            platformsSelected.delete(platform);
+          }else{
+            platformsSelected.add(platform);
+          }
+          const checkbox=card.querySelector('.jc-custom-checkbox');
+          checkbox?.classList.toggle('is-checked',platformsSelected.has(platform));
+          card.classList.toggle('is-selected',platformsSelected.has(platform));
+          updateEstimate();
+        });
+      });
+    }catch{}
+  };
+  void refreshPlatformCards();
+
+  // 启动批量同步
+  const startBtn=root.querySelector<HTMLButtonElement>('.jc-batch-start-btn');
+  startBtn?.addEventListener('click',async()=>{
+    if(selectedList.length===0||platformsSelected.size===0)return;
+
+    // 切换到执行看板视图
+    const configView=root.querySelector<HTMLElement>('.jc-batch-view-config');
+    const execView=root.querySelector<HTMLElement>('.jc-batch-view-exec');
+    const footer=root.querySelector<HTMLElement>('.jc-batch-modal-footer');
+    if(configView)configView.style.display='none';
+    if(execView)execView.style.display='block';
+    if(footer)footer.style.display='none';
+
+    // 构造任务项
+    const tasks:BatchTaskItem[]=[];
+    for(const article of selectedList){
+      for(const platform of platformsSelected){
+        tasks.push({
+          id:`${article.articleId}:${platform}`,
+          articleId:article.articleId,
+          title:article.title,
+          platform,
+          status:'pending'
+        });
+      }
+    }
+
+    const logList=root.querySelector<HTMLElement>('#jc-batch-log-list')!;
+    logList.innerHTML=tasks.map(t=>`
+      <div class="jc-batch-log-item" id="jc-log-${t.articleId}-${t.platform}">
+        <div class="jc-batch-log-info">
+          <span class="jc-batch-log-platform">${PLATFORM_META[t.platform].name}</span>
+          <span class="jc-batch-log-title" title="${escapeHtml(t.title)}">${escapeHtml(t.title)}</span>
+        </div>
+        <span class="jc-batch-log-status is-pending">排队中</span>
+      </div>
+    `).join('');
+
+    const progressFill=root.querySelector<HTMLElement>('#jc-batch-progress-fill')!;
+    const statText=root.querySelector<HTMLElement>('#jc-batch-stat-text')!;
+    const statCounts=root.querySelector<HTMLElement>('#jc-batch-stat-counts')!;
+    const pauseBtn=root.querySelector<HTMLButtonElement>('#jc-batch-pause-btn')!;
+    const stopBtn=root.querySelector<HTMLButtonElement>('#jc-batch-stop-btn')!;
+    const retryBtn=root.querySelector<HTMLButtonElement>('#jc-batch-retry-btn')!;
+
+    const renderProgress=(item:BatchTaskItem,stats:BatchStats)=>{
+      const percent=stats.total>0?Math.round((stats.completed/stats.total)*100):0;
+      progressFill.style.width=`${percent}%`;
+      statCounts.textContent=`已完成 ${stats.completed} / ${stats.total} (成功 ${stats.success}，失败 ${stats.failed})`;
+
+      if(stats.state==='paused'){
+        statText.textContent='⏸ 批量同步已暂停';
+      }else if(stats.state==='stopped'){
+        statText.textContent='⏹ 批量同步已终止';
+      }else if(stats.state==='completed'){
+        statText.textContent=`🎉 批量同步完成！成功 ${stats.success} 篇，失败 ${stats.failed} 篇`;
+      }else{
+        statText.textContent=`正在同步：${escapeHtml(item.title)} → ${PLATFORM_META[item.platform].name}`;
+      }
+
+      if(stats.state==='paused'){
+        pauseBtn.innerHTML='<span>▶ 继续队列</span>';
+      }else{
+        pauseBtn.innerHTML='<span>⏸ 暂停队列</span>';
+      }
+
+      if(stats.state==='completed'||stats.state==='stopped'){
+        pauseBtn.style.display='none';
+        stopBtn.style.display='none';
+        if(stats.failed>0){
+          retryBtn.style.display='inline-flex';
+        }
+      }
+
+      // 更新单项 DOM
+      const itemEl=root.querySelector<HTMLElement>(`#jc-log-${item.articleId}-${item.platform}`);
+      if(itemEl){
+        const statusSpan=itemEl.querySelector('.jc-batch-log-status');
+        if(statusSpan){
+          if(item.status==='syncing'){
+            statusSpan.className='jc-batch-log-status is-syncing';
+            statusSpan.innerHTML='<span class="jc-publish-spinner" style="width:10px;height:10px;margin-right:3px;"></span><span>同步中</span>';
+          }else if(item.status==='saved'){
+            statusSpan.className='jc-batch-log-status is-saved';
+            statusSpan.innerHTML=item.draftUrl?`<a href="${escapeHtml(item.draftUrl)}" target="_blank" rel="noreferrer" style="color:#00b42a;text-decoration:underline;">✓ 查看草稿 ↗</a>`:'<span>✓ 已保存</span>';
+          }else if(item.status==='failed'){
+            statusSpan.className='jc-batch-log-status is-failed';
+            statusSpan.innerHTML=`<span title="${escapeHtml(item.error||'失败')}">✗ ${escapeHtml(item.error?.slice(0,18)||'失败')}</span>`;
+          }else if(item.status==='skipped'){
+            statusSpan.className='jc-batch-log-status is-skipped';
+            statusSpan.textContent='已跳过';
+          }
+        }
+      }
+    };
+
+    pauseBtn.onclick=()=>{
+      if(!currentBatchQueue)return;
+      const stats=currentBatchQueue.getStats();
+      if(stats.state==='paused'){
+        currentBatchQueue.resume();
+      }else if(stats.state==='running'){
+        currentBatchQueue.pause();
+      }
+    };
+
+    stopBtn.onclick=()=>{
+      if(!currentBatchQueue)return;
+      if(confirm('确定要终止剩余任务吗？')){
+        currentBatchQueue.stop();
+      }
+    };
+
+    retryBtn.onclick=async()=>{
+      if(!currentBatchQueue)return;
+      retryBtn.style.display='none';
+      pauseBtn.style.display='inline-flex';
+      stopBtn.style.display='inline-flex';
+      await currentBatchQueue.retryFailed();
+    };
+
+    // 实例化并启动防风控队列
+    currentBatchQueue=new BatchSyncQueue({
+      concurrency:2,
+      jitterMinMs:1000,
+      jitterMaxMs:2500,
+      worker:async item=>{
+        const uuid=getJuejinUuid();
+        const currentAuth=modalAuths.find(a=>a.platform===item.platform);
+        const accountId=currentAuth?.accountId;
+        const result=await safeSendMessage({
+          type:'SYNC_HISTORY_ARTICLE',
+          articleId:item.articleId,
+          title:item.title,
+          platform:item.platform,
+          uuid,
+          accountId,
+          wechatAccountId:item.platform==='wechat'?accountId:undefined,
+          zhihuAccountId:item.platform==='zhihu'?accountId:undefined
+        });
+        if(!result)throw new Error('扩展已重载，请刷新网页');
+        if(!result.ok)throw new Error(result.message||'草稿保存失败');
+        rememberSynced(item.articleId,item.platform);
+        return{ok:true,draftUrl:result.task?.draftUrl};
+      },
+      onProgress:renderProgress
+    });
+
+    await currentBatchQueue.start(tasks);
+    syncedIds=undefined;
+    void markSyncedButtons();
+  });
+}
+
 function injectCreatorCenterSync(){
   if(!location.pathname.startsWith('/creator/content/article'))return;
-  document.querySelectorAll<HTMLElement>('.byte-dropdown').forEach(dropdown=>{
+  const dropdowns=document.querySelectorAll<HTMLElement>('.byte-dropdown');
+  let firstRow:HTMLElement|null=null;
+
+  dropdowns.forEach(dropdown=>{
     const cell=dropdown.parentElement;
-    if(!cell||cell.querySelector('.jc-creator-sync'))return;
     let row:HTMLElement|null=dropdown;
     let link:HTMLAnchorElement|null=null;
     while(row&&row!==document.body){
@@ -632,17 +1115,55 @@ function injectCreatorCenterSync(){
     if(!link)return;
     const articleId=extractArticleId(link.href);
     if(!articleId)return;
-    const button=document.createElement('button');
-    button.type='button';
-    button.className='jc-creator-sync';
-    button.dataset.articleId=articleId;
-    button.dataset.title=link.getAttribute('title')||link.querySelector<HTMLElement>('.title')?.textContent?.trim()||'';
-    button.dataset.state='idle';
-    button.title='选择平台并同步草稿';
-    button.innerHTML=`${SYNC_ICON}<span class="jc-history-label">同步多平台</span>`;
-    wireHistoryButton(button);
-    cell.insertBefore(button,dropdown);
+    const title=link.getAttribute('title')||link.querySelector<HTMLElement>('.title')?.textContent?.trim()||link.textContent?.trim()||'';
+
+    if(!firstRow&&row)firstRow=row;
+
+    // 1. 注入行级 Checkbox
+    const containerCell=link.parentElement;
+    if(containerCell&&!containerCell.querySelector(`.jc-article-select-checkbox[data-article-id="${articleId}"]`)){
+      const wrap=document.createElement('div');
+      wrap.className='jc-article-select-wrap';
+      const checkbox=document.createElement('input');
+      checkbox.type='checkbox';
+      checkbox.className='jc-article-select-checkbox';
+      checkbox.dataset.articleId=articleId;
+      checkbox.dataset.title=title;
+      checkbox.checked=selectedArticles.has(articleId);
+      checkbox.addEventListener('change',()=>{
+        if(checkbox.checked){
+          selectedArticles.set(articleId,{articleId,title});
+        }else{
+          selectedArticles.delete(articleId);
+        }
+        updateBatchActionBarState();
+      });
+      wrap.appendChild(checkbox);
+      containerCell.insertBefore(wrap,link);
+    }
+
+    // 2. 注入单篇“同步多平台”按钮
+    if(cell&&!cell.querySelector('.jc-creator-sync')){
+      const button=document.createElement('button');
+      button.type='button';
+      button.className='jc-creator-sync';
+      button.dataset.articleId=articleId;
+      button.dataset.title=title;
+      button.dataset.state='idle';
+      button.title='选择平台并同步草稿';
+      button.innerHTML=`${SYNC_ICON}<span class="jc-history-label">同步多平台</span>`;
+      wireHistoryButton(button);
+      cell.insertBefore(button,dropdown);
+    }
   });
+
+  // 3. 注入顶部浮动操作条
+  const targetRow=firstRow as HTMLElement|null;
+  if(targetRow){
+    const listParent=targetRow.parentElement;
+    if(listParent)injectBatchActionBar(listParent);
+  }
+  updateBatchActionBarState();
 }
 
 async function resumePendingHistory(){
