@@ -4,7 +4,7 @@ import {normalizeMarkdown} from '../src/targets/csdn-api';
 import {compileWechatHtml} from '../src/targets/wechat-content';
 
 function codeLines(html:string){
-  return [...html.matchAll(/<code><span leaf="">([\s\S]*?)<\/span><\/code>/g)].map(([,line])=>line==='&nbsp;'?'':line.replace(/&nbsp;/g,' ').replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&quot;/g,'"').replace(/&#39;/g,"'").replace(/&amp;/g,'&')).join('\n');
+  return [...html.matchAll(/<code><span leaf="">([\s\S]*?)<\/span><\/code>/g)].map(([,line])=>line==='&nbsp;'?'':line.replace(/<[^>]+>/g,'').replace(/&nbsp;/g,' ').replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&quot;/g,'"').replace(/&#39;/g,"'").replace(/&amp;/g,'&')).join('\n');
 }
 
 describe('代码内容保真',()=>{
