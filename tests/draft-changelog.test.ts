@@ -21,6 +21,7 @@ describe('Changelog 草稿生成器', () => {
       const result = parseCommit(commit, { repoUrl });
       expect(result).not.toBeNull();
       expect(result?.category).toBe('新增');
+      expect(result?.scope).toBe('wechat');
       expect(result?.subject).toBe('support mac window decoration');
       expect(result?.issues).toEqual(['#10']);
       expect(result?.refSuffix).toBe('#10');
@@ -123,10 +124,10 @@ describe('Changelog 草稿生成器', () => {
 
       expect(markdown).toContain('## [1.5.0] - 2026-10-21');
       expect(markdown).toContain('### 新增');
-      expect(markdown).toContain('- support mac window #10');
+      expect(markdown).toContain('- ✨ **wechat**：support mac window #10');
       expect(markdown).toContain('### 修复');
-      expect(markdown).toContain('- prevent rate limit #26');
-      expect(markdown).toContain('- 修复发布图片链接 [`6f8e031`](https://github.com/juejin-sync/juejin-sync/commit/6f8e031)');
+      expect(markdown).toContain('- 🛠️ **batch**：prevent rate limit #26');
+      expect(markdown).toContain('- 🛠️ 修复发布图片链接 [`6f8e031`](https://github.com/juejin-sync/juejin-sync/commit/6f8e031)');
     });
   });
 

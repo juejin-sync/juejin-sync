@@ -5,7 +5,7 @@ import path from 'node:path';
 const categoryIcons = [
   { match: /新增|新功能|feat/i, icon: '✨' },
   { match: /修复|fix/i, icon: '🛠️' },
-  { match: /改进|优化|perf|enhance|refactor/i, icon: '🛠️' },
+  { match: /改进|优化|perf|enhance|refactor/i, icon: '⚡' },
   { match: /工程|发布|构建|ci|infra|workflow/i, icon: '📦' },
   { match: /安全|security/i, icon: '🔒' },
   { match: /测试|test/i, icon: '🧪' },

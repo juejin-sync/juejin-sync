@@ -24,3 +24,20 @@ Bug 报告请包含浏览器版本、失效页面、复现步骤和经过脱敏�
 2. **端侧安全底线**：无论是否使用 AI 生成代码，均须严守“零 Cookie 收集、零服务端中转、零敏感数据上报”的端侧隐私底线；
 3. **工程质量把关**：所有 AI 参与产出的代码必须通过本地完整的静态类型检查与全量自动化测试（`npm run check && npm test`）。
 
+---
+
+### 📝 更新日志与 Release Notes 规范 (Changelog & Release Notes Convention)
+
+本项目更新日志遵循工业界标杆标准（“单层扁平 + 价值导向 + 精准挂载”）：
+1. **扁平单层列表**：不采用二级/多层树状缩进，保持条目扁平，提升视觉扫视效率；
+2. **标准格式**：
+   `- [Emoji] **[模块名称]**：简明描述用户可感知的改动与影响。#Issue #PR`
+3. **分类 Emoji**：
+   - `✨`：新增功能（feat）
+   - `🛠️`：问题修复（fix）
+   - `⚡`：体验与性能优化（perf / refactor）
+   - `📦`：工程化与工具链（chore / ci）
+4. **工具链协同**：
+   - 执行 `npm run changelog:draft` 基于 Git 提交与 Issue/PR 自动生成标准草稿；
+   - 执行 `npm run release:notes [version]` 自动提取符合规范的 GitHub Release 文本。
+
