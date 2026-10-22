@@ -47,6 +47,10 @@ export function parseCommit(rawCommit, options = {}) {
     }
   }
 
+  // 提取 scope
+  const scopeMatch = subject.trim().match(/^[a-z]+(?:\(([^)]*)\))?!?:/i);
+  const scope = scopeMatch?.[1]?.trim() || '';
+
   // 提取 PR 与 Issue 编号
   const issueSet = new Set();
 
@@ -100,6 +104,7 @@ export function parseCommit(rawCommit, options = {}) {
     shortHash,
     category,
     icon: matchedIcon,
+    scope,
     subject: cleanSubject,
     rawSubject: subject,
     issues,
@@ -173,7 +178,9 @@ export function generateChangelogDraft(commits, options = {}) {
 
     lines.push(`### ${cat}`, '');
     for (const item of items) {
-      const line = item.refSuffix ? `- ${item.subject} ${item.refSuffix}` : `- ${item.subject}`;
+      const scopePart = item.scope ? `**${item.scope}**：` : '';
+      const text = `${item.icon} ${scopePart}${item.subject}`.trim();
+      const line = item.refSuffix ? `- ${text} ${item.refSuffix}` : `- ${text}`;
       lines.push(line);
     }
     lines.push('');
