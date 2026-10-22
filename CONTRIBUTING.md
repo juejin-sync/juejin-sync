@@ -5,9 +5,10 @@
 提交前请确保本地全量通过：
 
 ```bash
-npm run check          # TypeScript 类型检查
-npm test               # 全量自动化单元测试
-npm run build:release  # 生产环境产物打包
+npm run check            # TypeScript 类型检查
+npm run changelog:check  # CHANGELOG 规范格式校验
+npm test                 # 全量自动化单元测试
+npm run build:release    # 生产环境产物打包
 ```
 
 发布版本前还需要运行 `npm run release:zip`，确认生成的 ZIP 根目录直接包含 `manifest.json`。新增站点权限或请求头规则时，请在 PR 中说明最小权限范围及其必要性。
@@ -37,7 +38,8 @@ Bug 报告请包含浏览器版本、失效页面、复现步骤和经过脱敏�
    - `🛠️`：问题修复（fix）
    - `⚡`：体验与性能优化（perf / refactor）
    - `📦`：工程化与工具链（chore / ci）
-4. **工具链协同**：
+4. **工具链协同与 CI 门禁**：
    - 执行 `npm run changelog:draft` 基于 Git 提交与 Issue/PR 自动生成标准草稿；
+   - 执行 `npm run changelog:check` 本地自检格式规范（CI 门禁强制校验）；
    - 执行 `npm run release:notes [version]` 自动提取符合规范的 GitHub Release 文本。
 

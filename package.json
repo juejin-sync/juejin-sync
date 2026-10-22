@@ -18,7 +18,8 @@
     "dev": "node build.mjs --watch",
     "release:zip": "npm run check && npm test && npm run build:release && node scripts/package-release.mjs",
     "release:notes": "node scripts/extract-release-notes.mjs",
-    "changelog:draft": "node scripts/draft-changelog.mjs"
+    "changelog:draft": "node scripts/draft-changelog.mjs",
+    "changelog:check": "node scripts/check-changelog.mjs"
   },
   "devDependencies": {
     "@types/archiver": "^8.0.0",
