@@ -96,7 +96,7 @@ export function buildWechatDraftForm(article:Article,content:string,meta:WechatM
   Object.entries(base).forEach(([key,value])=>form.set(key,value));return form;
 }
 
-type SaveOptions={appMsgId?:string;accountId?:string;theme?:WechatCodeTheme;onPreparing?:()=>void;onProgress?:(progress:TaskProgress)=>void|Promise<void>;onSaving?:()=>void|Promise<void>};
+type SaveOptions={appMsgId?:string;accountId?:string;theme?:WechatCodeTheme;onPreparing?:()=>void;onProgress?:(progress:TaskProgress)=>void|Promise<void>;onSaving?:()=>void|Promise<void>;onDowngradeToCreate?:()=>void|Promise<void>};
 export async function saveWechatDraft(article:Article,options:SaveOptions={}){
   if(article.title.trim().length<1||article.title.trim().length>64)throw new SyncError('微信公众号标题需为 1～64 个字符','content','validation');
   if(article.markdown.trim().length<20)throw new SyncError('文章正文不完整，暂无法同步到微信公众号','content','validation');
@@ -127,33 +127,55 @@ export async function saveWechatDraft(article:Article,options:SaveOptions={}){
   // 图片处理期间可能切换公众号；最终写入前再次核验，并使用新鲜凭据。
   const writeMeta=await requireMeta(meta.userName);
   await options.onSaving?.();
-  const isEdit=!!options.appMsgId;
-  const url=new URL(`${HOME}cgi-bin/operate_appmsg`);
-  Object.entries({t:'ajax-response',sub:isEdit?'edit':'create',type:'77',token:writeMeta.token,lang:'zh_CN'}).forEach(([key,value])=>url.searchParams.set(key,value));
-  let response:Response;
-  let result:{appMsgId?:string|number;base_resp?:{err_msg?:string;ret?:number};errmsg?:string};
-  try{
-    response=await fetch(url,{method:'POST',credentials:'include',signal:AbortSignal.timeout(30000),headers:{'content-type':'application/x-www-form-urlencoded;charset=UTF-8'},body:buildWechatDraftForm(article,html,writeMeta,covers,options.appMsgId)});
-    result=await response.json();
-    if(!result||typeof result!=='object'||response.status>=500)throw new Error();
-  }catch{
-    throw new SyncError('无法确认微信草稿是否已保存，请先检查公众号草稿箱，不要直接重复同步','interrupted','draft');
+  const resultWarnings:string[]=[];
+  let currentAppMsgId=options.appMsgId;
+  let downgraded=false;
+
+  // 最多尝试两次：第一次按原始意图（编辑或新建），若编辑失败则降级为新建重试一次。
+  // 图片和封面在上方已全部处理完毕，降级重试只重发 API 请求，不会重复上传。
+  for(let attempt=0;attempt<2;attempt++){
+    const isEdit=!!currentAppMsgId;
+    const url=new URL(`${HOME}cgi-bin/operate_appmsg`);
+    Object.entries({t:'ajax-response',sub:isEdit?'edit':'create',type:'77',token:writeMeta.token,lang:'zh_CN'}).forEach(([key,value])=>url.searchParams.set(key,value));
+    let response:Response;
+    let result:{appMsgId?:string|number;base_resp?:{err_msg?:string;ret?:number};errmsg?:string};
+    try{
+      response=await fetch(url,{method:'POST',credentials:'include',signal:AbortSignal.timeout(30000),headers:{'content-type':'application/x-www-form-urlencoded;charset=UTF-8'},body:buildWechatDraftForm(article,html,writeMeta,covers,currentAppMsgId)});
+      result=await response.json();
+      if(!result||typeof result!=='object'||response.status>=500)throw new Error();
+    }catch{
+      throw new SyncError('无法确认微信草稿是否已保存，请先检查公众号草稿箱，不要直接重复同步','interrupted','draft');
+    }
+    // 微信特定错误响应精细化识别
+    if(result.base_resp?.ret===200003||result.base_resp?.ret===-6){
+      throw new SyncError(`微信公众平台登录已过期 (错误码 ${result.base_resp.ret})，请重新登录公众号后台后重试`,'login','authentication');
+    }
+    if(result.base_resp?.ret===200013){
+      throw new SyncError('微信公众平台请求过于频繁 (错误码 200013)，请稍后重试','rate-limit','draft');
+    }
+    if(response.ok&&result.base_resp?.ret===undefined&&!result.appMsgId){
+      throw new SyncError('微信保存响应缺少结果，无法确认是否已保存，请先检查草稿箱','interrupted','draft');
+    }
+    const finalAppMsgId=result.appMsgId||currentAppMsgId;
+    if(response.ok&&result.base_resp?.ret===0&&!finalAppMsgId){
+      throw new SyncError('微信返回成功但缺少草稿标识，请先检查草稿箱确认保存结果','interrupted','draft');
+    }
+    if(!response.ok||!finalAppMsgId||(result.base_resp?.ret!==undefined&&result.base_resp.ret!==0)){
+      // 编辑模式失败且非认证/频控错误：原草稿可能已发布或被删除，降级为新建重试一次。
+      if(isEdit&&attempt===0){
+        await options.onDowngradeToCreate?.();
+        currentAppMsgId=undefined;
+        downgraded=true;
+        continue;
+      }
+      const errorDetail=result.base_resp?.err_msg||(result.base_resp?.ret!==undefined?`错误码 (${result.base_resp.ret})`:'')||result.errmsg||(response.ok?'操作未成功':String(response.status));
+      throw new SyncError(`保存微信草稿失败：${errorDetail}`,'platform-change','draft');
+    }
+    // 成功路径
+    if(downgraded)resultWarnings.push('原草稿可能已发布或被删除，已自动创建新草稿，请检查草稿箱');
+    const draftUrl=`${HOME}cgi-bin/appmsg?t=media/appmsg_edit&action=edit&type=77&appmsgid=${finalAppMsgId}&token=${writeMeta.token}&lang=zh_CN`;
+    return{draftUrl,articleId:String(finalAppMsgId),warnings:resultWarnings,stats:{imageTotal,imageSucceeded:uploaded.length+(article.cover?1:0),imageFailed:0}};
   }
-  // 微信特定错误响应精细化识别
-  if(result.base_resp?.ret===200003||result.base_resp?.ret===-6){
-    throw new SyncError(`微信公众平台登录已过期 (错误码 ${result.base_resp.ret})，请重新登录公众号后台后重试`,'login','authentication');
-  }
-  if(result.base_resp?.ret===200013){
-    throw new SyncError('微信公众平台请求过于频繁 (错误码 200013)，请稍后重试','rate-limit','draft');
-  }
-  // 更新失败绝不隐式转为新建；不认识的响应也不能借旧 ID 冒充保存成功。
-  if(response.ok&&result.base_resp?.ret===undefined&&!result.appMsgId)throw new SyncError('微信保存响应缺少结果，无法确认是否已保存，请先检查草稿箱','interrupted','draft');
-  const finalAppMsgId=result.appMsgId||options.appMsgId;
-  if(response.ok&&result.base_resp?.ret===0&&!finalAppMsgId)throw new SyncError('微信返回成功但缺少草稿标识，请先检查草稿箱确认保存结果','interrupted','draft');
-  if(!response.ok||!finalAppMsgId||(result.base_resp?.ret!==undefined&&result.base_resp.ret!==0)){
-    const errorDetail=result.base_resp?.err_msg||(result.base_resp?.ret!==undefined?`错误码 (${result.base_resp.ret})`:'')||result.errmsg||(response.ok?'操作未成功':String(response.status));
-    throw new SyncError(`保存微信草稿失败：${errorDetail}`,'platform-change','draft');
-  }
-  const draftUrl=`${HOME}cgi-bin/appmsg?t=media/appmsg_edit&action=edit&type=77&appmsgid=${finalAppMsgId}&token=${writeMeta.token}&lang=zh_CN`;
-  return{draftUrl,articleId:String(finalAppMsgId),warnings:[] as string[],stats:{imageTotal,imageSucceeded:uploaded.length+(article.cover?1:0),imageFailed:0}};
+  // TypeScript 兜底：循环内一定会 return 或 throw，此行理论上不可达。
+  throw new SyncError('微信草稿保存逻辑异常','platform-change','draft');
 }

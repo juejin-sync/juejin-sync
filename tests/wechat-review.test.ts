@@ -28,8 +28,26 @@ const success=()=>Response.json({appMsgId:'draft-1',base_resp:{ret:0,err_msg:'ok
 afterEach(()=>vi.unstubAllGlobals());
 
 describe('微信写入安全',()=>{
-  it.each([400,401,429,500])('更新返回 %i 不会降级新建',async status=>{
-    const fetch=mockWechat(()=>Response.json({base_resp:{ret:-1,err_msg:'rejected'}},{status}));
+  it.each([400,401,429])('更新返回 %i 时自动降级为新建',async status=>{
+    let callCount=0;
+    const fetch=mockWechat(()=>{
+      callCount++;
+      if(callCount===1)return Response.json({base_resp:{ret:-1,err_msg:'rejected'}},{status});
+      return success();
+    });
+    vi.stubGlobal('fetch',fetch);
+    const onDowngrade=vi.fn();
+    const result=await saveWechatDraft(article,{appMsgId:'old',accountId:'gh_a',onDowngradeToCreate:onDowngrade});
+    expect(onDowngrade).toHaveBeenCalledOnce();
+    expect(result.articleId).toBe('draft-1');
+    expect(result.warnings).toContain('原草稿可能已发布或被删除，已自动创建新草稿，请检查草稿箱');
+    const writes=fetch.mock.calls.filter(([url])=>String(url).includes('operate_appmsg'));
+    expect(writes).toHaveLength(2);
+    expect(String(writes[0][0])).toContain('sub=edit');
+    expect(String(writes[1][0])).toContain('sub=create');
+  });
+  it('更新返回 500 不会降级新建',async status=>{
+    const fetch=mockWechat(()=>Response.json({base_resp:{ret:-1,err_msg:'rejected'}},{status:500}));
     vi.stubGlobal('fetch',fetch);
     await expect(saveWechatDraft(article,{appMsgId:'old',accountId:'gh_a'})).rejects.toBeDefined();
     const writes=fetch.mock.calls.filter(([url])=>String(url).includes('operate_appmsg'));
@@ -76,13 +94,23 @@ describe('微信写入安全',()=>{
     expect((await saveWechatDraft({...article,cover:'https://example.com/cover.png'})).stats.imageTotal).toBe(1);
     expect(fetch.mock.calls.some(([url])=>String(url).includes('cropimage'))).toBe(true);
   });
-  it.each([1,-1,200040,987654])('更新返回业务错误 %i 不自动新建',async ret=>{
-    const fetch=mockWechat(()=>Response.json({base_resp:{ret,err_msg:''}}));
+  it.each([1,-1,200040,987654])('更新返回业务错误 %i 自动降级为新建',async ret=>{
+    let callCount=0;
+    const fetch=mockWechat(()=>{
+      callCount++;
+      if(callCount===1)return Response.json({base_resp:{ret,err_msg:''}});
+      return success();
+    });
     vi.stubGlobal('fetch',fetch);
-    await expect(saveWechatDraft(article,{appMsgId:'old',accountId:'gh_a'})).rejects.toMatchObject({category:'platform-change'});
+    const onDowngrade=vi.fn();
+    const result=await saveWechatDraft(article,{appMsgId:'old',accountId:'gh_a',onDowngradeToCreate:onDowngrade});
+    expect(onDowngrade).toHaveBeenCalledOnce();
+    expect(result.articleId).toBe('draft-1');
+    expect(result.warnings).toContain('原草稿可能已发布或被删除，已自动创建新草稿，请检查草稿箱');
     const writes=fetch.mock.calls.filter(([url])=>String(url).includes('operate_appmsg'));
-    expect(writes).toHaveLength(1);
+    expect(writes).toHaveLength(2);
     expect(String(writes[0][0])).toContain('sub=edit');
+    expect(String(writes[1][0])).toContain('sub=create');
   });
   it('Mermaid 渲染不可用时不上传图片也不保存缺图草稿',async()=>{
     const fetch=mockWechat(success);vi.stubGlobal('fetch',fetch);
