@@ -80,12 +80,12 @@ describe('CHANGELOG 格式校验器 (check-changelog)', () => {
   });
 
   describe('validateChangelogFile', () => {
-    it('当前仓库 CHANGELOG.md 最新版本 1.5.0 校验 100% 通过', () => {
+    it('当前仓库 CHANGELOG.md 最新版本校验 100% 通过', () => {
       const result = validateChangelogFile('CHANGELOG.md');
       expect(result.success).toBe(true);
       expect(result.errors).toEqual([]);
-      expect(result.version).toBe('1.5.0');
-      expect(result.totalItems).toBe(10);
+      expect(result.version).toBe('1.5.1');
+      expect(result.totalItems).toBe(3);
     });
   });
 });
