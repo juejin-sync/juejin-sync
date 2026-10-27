@@ -24,10 +24,10 @@
 
 | 平台 | 同步类型 | 支持状态 |
 | :--- | :--- | :---: |
-| 🔴 **CSDN** | 草稿箱（Markdown 适配与图片转存） | ✅ 已支持 |
-| 🟢 **微信公众号** | 草稿箱（原生图文排版、代码高亮与封面裁剪） | ✅ 已支持 |
-| 🔵 **博客园** | 随笔草稿箱（Markdown 适配与图片转存） | ✅ 已支持 |
-| 🔷 **知乎专栏** | 专栏草稿箱（富文本排版与公式高保真） | ✅ 已支持 |
+| <img src="assets/platform-csdn.png" width="18" height="18" valign="middle" alt="CSDN"> **CSDN** | 草稿箱（Markdown 适配与图片转存） | ✅ 已支持 |
+| <img src="assets/platform-wechat.png" width="18" height="18" valign="middle" alt="微信公众号"> **微信公众号** | 草稿箱（原生图文排版、代码高亮与封面裁剪） | ✅ 已支持 |
+| <img src="assets/platform-cnblogs.png" width="18" height="18" valign="middle" alt="博客园"> **博客园** | 随笔草稿箱（Markdown 适配与图片转存） | ✅ 已支持 |
+| <img src="assets/platform-zhihu.png" width="18" height="18" valign="middle" alt="知乎专栏"> **知乎专栏** | 专栏草稿箱（富文本排版与公式高保真） | ✅ 已支持 |
 
 ---
 
