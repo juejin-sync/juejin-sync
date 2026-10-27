@@ -172,7 +172,11 @@ async function runTask(task:SyncTask){
         await sleep(cooldown-elapsed);
       }
       try{
-        return task.platform==='wechat'?await saveWechatDraft(transformed,{...callbacks,appMsgId:task.wechatAppMsgId,accountId:task.wechatAccountId,theme:settings.wechatCodeTheme}):task.platform==='cnblogs'?await saveCnblogsDraft(transformed,{
+        return task.platform==='wechat'?await saveWechatDraft(transformed,{...callbacks,appMsgId:task.wechatAppMsgId,accountId:task.wechatAccountId,theme:settings.wechatCodeTheme,onDowngradeToCreate:async()=>{
+            task.wechatAppMsgId=undefined;
+            await patchTask(task.id,{wechatAppMsgId:undefined,draftUrl:undefined});
+            await removeArticleDraftMapping(task.article,'wechat',task.wechatAccountId);
+          }}):task.platform==='cnblogs'?await saveCnblogsDraft(transformed,{
           ...callbacks,
           postId:cnblogsPostId,
           expectedAccountId:task.cnblogsAccountId,
