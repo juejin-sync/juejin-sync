@@ -16,7 +16,7 @@
     {"matches":["https://juejin.cn/*"],"js":["juejin-page.js"],"run_at":"document_idle","world":"MAIN"},
     {"matches":["https://juejin.cn/*"],"js":["juejin-content.js"],"css":["juejin-content.css"],"run_at":"document_idle"},
     {"matches":["https://zhuanlan.zhihu.com/*"],"js":["zhihu-bridge.js"],"run_at":"document_idle"},
-    {"matches":["https://creator.xiaohongshu.com/*"],"js":["xiaohongshu-page.js"],"run_at":"document_idle","world":"MAIN"},
+    {"matches":["https://creator.xiaohongshu.com/*"],"js":["xiaohongshu-page.js"],"run_at":"document_start","world":"MAIN"},
     {"matches":["https://creator.xiaohongshu.com/*"],"js":["xiaohongshu-bridge.js"],"run_at":"document_idle"}
   ]
 }

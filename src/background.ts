@@ -14,7 +14,7 @@ import {buildDryRunReport,checkCsdnAuth,fetchCsdnArticleState,fetchCsdnCategorie
 import {checkWechatAuth,requireWechatAccount,saveWechatDraft} from './targets/wechat-api';
 import {checkCnblogsAuth,fetchCnblogsPostState,saveCnblogsDraft} from './targets/cnblogs-api';
 import {checkZhihuAuth,fetchZhihuDraftState,saveZhihuDraft} from './targets/zhihu-api';
-import {checkXiaohongshuAuth,fetchXiaohongshuNoteState,saveXiaohongshuDraft} from './targets/xiaohongshu-api';
+import {checkXiaohongshuAuth,saveXiaohongshuDraft} from './targets/xiaohongshu-api';
 import type {Article,ExtensionSettings,PlatformId,SyncTask,TaskStage} from './types';
 import {uid} from './types';
 
@@ -76,7 +76,6 @@ async function runTask(task:SyncTask){
   let stage:TaskStage='validation';
   let savedResult:Awaited<ReturnType<typeof saveDraftViaApi>>|undefined;
   let zhihuArticleId=task.zhihuArticleId;
-  let xiaohongshuNoteId=task.xiaohongshuNoteId;
   try{
     if(task.platform==='wechat'){
       if(!task.wechatAccountId)throw new SyncError('旧微信任务未绑定公众号，已阻止自动恢复，请从掘金重新发起并核对旧草稿','blocked','authentication');
@@ -100,7 +99,7 @@ async function runTask(task:SyncTask){
       if(!auth.ok)throw new SyncError(auth.message||'小红书登录状态检测失败','platform-change','authentication');
       if(!auth.loggedIn)throw new SyncError('请先登录小红书创作服务平台','login','authentication');
       if(!auth.accountId)throw new SyncError('无法确认小红书账号身份，已阻止写入草稿','blocked','authentication');
-      if(task.xiaohongshuAccountId&&auth.accountId!==task.xiaohongshuAccountId)throw new SyncError('当前小红书账号与任务创建时不一致，已阻止覆盖草稿','blocked','authentication');
+      if(task.xiaohongshuAccountId&&auth.accountId!==task.xiaohongshuAccountId)throw new SyncError('当前小红书账号与任务创建时不一致，已阻止写入草稿','blocked','authentication');
     }
     let article=await ensureArticleContent(task.article);
     const settings=await getSettings();
@@ -170,22 +169,11 @@ async function runTask(task:SyncTask){
       if(state==='unknown')throw new SyncError('无法确认知乎文章仍是草稿，已暂停更新','blocked','draft');
       if(state==='missing')await clearZhihuTarget();
     }
-    const clearXiaohongshuTarget=async()=>{
-      xiaohongshuNoteId=undefined;
-      await patchTask(task.id,{xiaohongshuNoteId:undefined,draftUrl:undefined});
-      await removeArticleDraftMapping(task.article,'xiaohongshu',task.xiaohongshuAccountId);
-    };
-    if(task.platform==='xiaohongshu'&&xiaohongshuNoteId){
-      const state=await fetchXiaohongshuNoteState(xiaohongshuNoteId,task.xiaohongshuAccountId);
-      if(state==='unauthorized')throw new SyncError('请先登录小红书，再更新已有草稿','login','authentication');
-      if(state==='published')throw new SyncError('该小红书笔记已发布，为避免覆盖线上内容已阻断同步','blocked','draft');
-      if(state==='unknown')throw new SyncError('无法确认小红书笔记仍是草稿，已暂停更新','blocked','draft');
-      if(state==='missing')await clearXiaohongshuTarget();
-    }
-    const isUpdate=()=>!!targetArticleId({...task,csdnArticleId,cnblogsPostId,zhihuArticleId,xiaohongshuNoteId});
+    // 小红书每次新建本地草稿，本地 draftId 不参与远端覆盖判断。
+    const isUpdate=()=>!!targetArticleId({...task,csdnArticleId,cnblogsPostId,zhihuArticleId});
     const callbacks={
       onPreparing:()=>{stage='content';},
-      onProgress:async(progress:SyncTask['progress'])=>{stage='images';if(progress)await patchTask(task.id,{status:'transforming',progress});},
+      onProgress:async(progress:SyncTask['progress'])=>{stage='images';if(progress)await patchTask(task.id,{status:task.platform==='xiaohongshu'?'writing':'transforming',progress});},
       onSaving:async()=>{stage='draft';await patchTask(task.id,{status:'writing',progress:{current:1,total:1,message:isUpdate()?`正在更新${platformLabel(task.platform)}草稿`:`正在创建${platformLabel(task.platform)}草稿`}});}
     };
     const result=await platformGates[task.platform].run(async()=>{
@@ -219,15 +207,9 @@ async function runTask(task:SyncTask){
           }
         }):task.platform==='xiaohongshu'?await saveXiaohongshuDraft(transformed,{
           ...callbacks,
-          noteId:xiaohongshuNoteId,
           expectedAccountId:task.xiaohongshuAccountId,
           appendSourceLink:settings.appendSourceLink,
-          syncCover:settings.syncCover,
-          onDraftCreated:async(createdId:string,createdUrl:string)=>{
-            xiaohongshuNoteId=createdId;
-            await patchTask(task.id,{xiaohongshuNoteId:createdId,draftUrl:createdUrl});
-            await saveArticleDraftMapping(task.article,createdId,createdUrl,'xiaohongshu',task.xiaohongshuAccountId);
-          }
+          syncCover:settings.syncCover
         }):await saveDraftViaApi(transformed,{
           articleId:csdnArticleId,
           categories:resolveCsdnCategories(transformed.tags,settings),
@@ -245,9 +227,9 @@ async function runTask(task:SyncTask){
       }
     });
     savedResult=result;
-    const targetPatch=task.platform==='wechat'?{wechatAppMsgId:result.articleId}:task.platform==='cnblogs'?{cnblogsPostId:result.articleId}:task.platform==='zhihu'?{zhihuArticleId:result.articleId}:task.platform==='xiaohongshu'?{xiaohongshuNoteId:result.articleId}:{csdnArticleId:result.articleId};
+    const targetPatch=task.platform==='wechat'?{wechatAppMsgId:result.articleId}:task.platform==='cnblogs'?{cnblogsPostId:result.articleId}:task.platform==='zhihu'?{zhihuArticleId:result.articleId}:task.platform==='xiaohongshu'?{xiaohongshuDraftId:result.articleId}:{csdnArticleId:result.articleId};
     await finishSavedTask(task.id,result.articleId,result.draftUrl,{draftUrl:result.draftUrl,...targetPatch,warnings:result.warnings,stats:{...result.stats,durationMs:Date.now()-startedAt},progress:undefined,error:undefined,diagnostic:undefined});
-    // 徽标是保存后的附属操作，失败不能把已落盘的远端成功改写成同步失败。
+    // 徽标是保存后的附属操作，失败不能把目标平台已保存改写成同步失败。
     try{
       await chrome.action.setBadgeBackgroundColor({color:'#1d6744'});
       await chrome.action.setBadgeText({text:'✓'});
@@ -258,15 +240,15 @@ async function runTask(task:SyncTask){
     if(notification)await showTaskNotification(notification);
   }catch(error){
     if(savedResult){
-      // 远端已返回草稿 ID；即使首次本地写入失败，也不能允许按“新建失败”自动重试。
+      // 目标平台已返回保存凭证；即使任务记录首次写入失败，也不能按“新建失败”自动重试。
       const diagnostic=classifySyncError(new SyncError('草稿已在目标平台保存，但本地结果记录失败。请先检查目标草稿箱','interrupted','recovery'),'recovery');
-      const targetPatch=task.platform==='wechat'?{wechatAppMsgId:savedResult.articleId}:task.platform==='cnblogs'?{cnblogsPostId:savedResult.articleId}:task.platform==='zhihu'?{zhihuArticleId:savedResult.articleId}:task.platform==='xiaohongshu'?{xiaohongshuNoteId:savedResult.articleId}:{csdnArticleId:savedResult.articleId};
+      const targetPatch=task.platform==='wechat'?{wechatAppMsgId:savedResult.articleId}:task.platform==='cnblogs'?{cnblogsPostId:savedResult.articleId}:task.platform==='zhihu'?{zhihuArticleId:savedResult.articleId}:task.platform==='xiaohongshu'?{xiaohongshuDraftId:savedResult.articleId}:{csdnArticleId:savedResult.articleId};
       try{await patchTask(task.id,{status:'needs-user',draftUrl:savedResult.draftUrl,...targetPatch,error:diagnostic.message,diagnostic,progress:undefined});}
       catch(recordError){console.warn('草稿已保存，但本地任务记录仍无法写入：',recordError);}
       throw error;
     }
     // 草稿标识可能由适配器在失败前返回（如保存成功但本地记录失败），优先保留以免重复创建。
-    const errArticleId=(error as any)?.articleId||(task.platform==='zhihu'?zhihuArticleId:task.platform==='xiaohongshu'?xiaohongshuNoteId:undefined);
+    const errArticleId=(error as any)?.articleId||(task.platform==='zhihu'?zhihuArticleId:undefined);
     const errDraftUrl=(error as any)?.draftUrl||(errArticleId&&task.platform==='zhihu'?`https://zhuanlan.zhihu.com/p/${errArticleId}/edit`:undefined);
     if(errArticleId){
       try{
@@ -276,7 +258,7 @@ async function runTask(task:SyncTask){
     const diagnostic=classifySyncError(error,stage);
     const isNeedsUser=['login','blocked','interrupted'].includes(diagnostic.category)||Boolean(errArticleId);
     const errorPatch={
-      ...(errArticleId?(task.platform==='zhihu'?{zhihuArticleId:errArticleId}:task.platform==='xiaohongshu'?{xiaohongshuNoteId:errArticleId}:{}):{}),
+      ...(errArticleId?(task.platform==='zhihu'?{zhihuArticleId:errArticleId}:task.platform==='xiaohongshu'?{xiaohongshuDraftId:errArticleId}:{}):{}),
       ...(errDraftUrl?{draftUrl:errDraftUrl}:{})
     };
     const failedTask:SyncTask={...task,...errorPatch,status:isNeedsUser?'needs-user':'failed',error:diagnostic.message,diagnostic};
@@ -334,18 +316,17 @@ async function create(article:Article,platform:PlatformId='csdn',expectedAccount
   if(active)return active;
   const settings=await getSettings();
   const now=new Date().toISOString();
-  const mapping=!previous?await getArticleDraftMapping(article,platform,currentAccountId):undefined;
+  const mapping=platform!=='xiaohongshu'&&!previous?await getArticleDraftMapping(article,platform,currentAccountId):undefined;
   const csdnArticleId=platform==='csdn'?(previous?.csdnArticleId||extractCsdnArticleId(previous?.draftUrl)||mapping?.csdnArticleId):undefined;
   const wechatAppMsgId=platform==='wechat'?(previous?.wechatAppMsgId||mapping?.wechatAppMsgId):undefined;
   const cnblogsPostId=platform==='cnblogs'?(previous?.cnblogsPostId||mapping?.cnblogsPostId):undefined;
   const zhihuArticleId=platform==='zhihu'?(previous?.zhihuArticleId||extractZhihuArticleId(previous?.draftUrl)||mapping?.zhihuArticleId):undefined;
-  const xiaohongshuNoteId=platform==='xiaohongshu'?(previous?.xiaohongshuNoteId||mapping?.xiaohongshuNoteId):undefined;
-  const draftUrl=previous?.draftUrl||mapping?.draftUrl;
-  const targetId=platform==='csdn'?csdnArticleId:platform==='cnblogs'?cnblogsPostId:platform==='zhihu'?zhihuArticleId:platform==='xiaohongshu'?xiaohongshuNoteId:wechatAppMsgId;
+  const draftUrl=platform==='xiaohongshu'?undefined:previous?.draftUrl||mapping?.draftUrl;
+  const targetId=platform==='csdn'?csdnArticleId:platform==='cnblogs'?cnblogsPostId:platform==='zhihu'?zhihuArticleId:wechatAppMsgId;
   const needsConfirmation=shouldConfirmDraftUpdate(settings,targetId);
   const task:SyncTask=previous
-    ?{...previous,article,status:needsConfirmation?'needs-confirmation':'queued',updatedAt:now,csdnArticleId,wechatAppMsgId,cnblogsPostId,zhihuArticleId,xiaohongshuNoteId,zhihuAccountId,cnblogsAccountId,xiaohongshuAccountId,error:undefined,diagnostic:undefined,warnings:undefined,stats:undefined,progress:undefined}
-    :{id:uid(),article,platform,wechatAccountId,cnblogsAccountId,zhihuAccountId,xiaohongshuAccountId,status:needsConfirmation?'needs-confirmation':'queued',createdAt:now,updatedAt:now,attempts:0,csdnArticleId,wechatAppMsgId,cnblogsPostId,zhihuArticleId,xiaohongshuNoteId,draftUrl};
+    ?{...previous,article,status:needsConfirmation?'needs-confirmation':'queued',updatedAt:now,csdnArticleId,wechatAppMsgId,cnblogsPostId,zhihuArticleId,xiaohongshuDraftId:undefined,draftUrl,zhihuAccountId,cnblogsAccountId,xiaohongshuAccountId,error:undefined,diagnostic:undefined,warnings:undefined,stats:undefined,progress:undefined}
+    :{id:uid(),article,platform,wechatAccountId,cnblogsAccountId,zhihuAccountId,xiaohongshuAccountId,status:needsConfirmation?'needs-confirmation':'queued',createdAt:now,updatedAt:now,attempts:0,csdnArticleId,wechatAppMsgId,cnblogsPostId,zhihuArticleId,draftUrl};
   await putTask(task);
   if(needsConfirmation)return task;
   await execute(task);
@@ -520,11 +501,11 @@ chrome.runtime.onMessage.addListener((message,sender,reply)=>{
           if(task.platform==='wechat')task.wechatAppMsgId=undefined;
           else if(task.platform==='cnblogs')task.cnblogsPostId=undefined;
           else if(task.platform==='zhihu')task.zhihuArticleId=undefined;
-          else if(task.platform==='xiaohongshu')task.xiaohongshuNoteId=undefined;
+          else if(task.platform==='xiaohongshu')task.xiaohongshuDraftId=undefined;
           else task.csdnArticleId=undefined;
           task.draftUrl=undefined;
           await removeArticleDraftMapping(task.article,task.platform,taskAccountId(task));
-          await patchTask(task.id,{wechatAppMsgId:undefined,csdnArticleId:undefined,cnblogsPostId:undefined,zhihuArticleId:undefined,xiaohongshuNoteId:undefined,draftUrl:undefined,error:undefined,diagnostic:undefined,status:'queued'});
+          await patchTask(task.id,{wechatAppMsgId:undefined,csdnArticleId:undefined,cnblogsPostId:undefined,zhihuArticleId:undefined,xiaohongshuDraftId:undefined,draftUrl:undefined,error:undefined,diagnostic:undefined,status:'queued'});
         }
         void execute(task).catch(()=>{});
         reply({ok:true});

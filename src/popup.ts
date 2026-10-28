@@ -213,11 +213,11 @@ function taskCard(task:SyncTask){
   }
   const cover=task.article.cover?`<img src="${escapeHtml(task.article.cover)}" alt="">`:'';
   const actions=[];
-  if(task.draftUrl)actions.push(`<button class="history-action btn-action-primary" data-open="${escapeHtml(task.draftUrl)}">草稿 ↗</button>`);
+  if(task.draftUrl)actions.push(`<button class="history-action btn-action-primary" data-open="${escapeHtml(task.draftUrl)}" title="${task.platform==='xiaohongshu'?'在发布页点击草稿箱查看当前浏览器保存的草稿':'打开草稿'}">${task.platform==='xiaohongshu'?'本地草稿入口 ↗':'草稿 ↗'}</button>`);
   if(task.platform==='csdn'&&!['queued','checking-login','transforming','writing'].includes(task.status))actions.push(`<button class="history-action btn-action-dryrun" data-dryrun="${escapeHtml(task.id)}" title="同步预演：查看分类命中、图片转存与内容风险，不写入 CSDN">预演</button>`);
   if(task.status==='needs-confirmation')actions.push(`<button class="history-action confirm btn-action-confirm" data-confirm="${escapeHtml(task.id)}">确认更新</button>`);
   if(['failed','needs-user'].includes(task.status))actions.push(`<button class="history-action retry btn-action-retry" data-retry="${escapeHtml(task.id)}">重试</button>`);
-  if(['failed','needs-user'].includes(task.status)&&(task.wechatAppMsgId||task.csdnArticleId||task.cnblogsPostId||task.zhihuArticleId||task.xiaohongshuNoteId))actions.push(`<button class="history-action retry btn-action-retry" data-retry-new="${escapeHtml(task.id)}" title="忽略旧草稿关联，作为全新草稿重新保存">另存新草稿</button>`);
+  if(['failed','needs-user'].includes(task.status)&&(task.wechatAppMsgId||task.csdnArticleId||task.cnblogsPostId||task.zhihuArticleId))actions.push(`<button class="history-action retry btn-action-retry" data-retry-new="${escapeHtml(task.id)}" title="忽略旧草稿关联，作为全新草稿重新保存">另存新草稿</button>`);
   if(!['queued','checking-login','transforming','writing'].includes(task.status))actions.push(`<button class="history-action delete btn-action-delete" data-delete="${escapeHtml(task.id)}" title="删除本地记录" aria-label="删除本地记录"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg></button>`);
   const action=`<span class="task-actions">${actions.join('')}</span>`;
   const error=task.error?`<p class="platform-error" title="${escapeHtml(task.error)}">${escapeHtml(task.error)}</p>`:'';

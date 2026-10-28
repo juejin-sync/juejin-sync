@@ -15,7 +15,7 @@ export function findMatchingTask(tasks:SyncTask[],article:SyncTask['article'],pl
   return tasks.find(task=>articleIdentityKeys(task.article).some(identity=>identities.has(identity))&&task.platform===platform&&(platform==='csdn'||taskAccountId(task)===accountId));
 }
 
-export function targetArticleId(task:SyncTask){return task.platform==='wechat'?task.wechatAppMsgId:task.platform==='cnblogs'?task.cnblogsPostId:task.platform==='zhihu'?task.zhihuArticleId:task.platform==='xiaohongshu'?task.xiaohongshuNoteId:task.csdnArticleId;}
+export function targetArticleId(task:SyncTask){return task.platform==='wechat'?task.wechatAppMsgId:task.platform==='cnblogs'?task.cnblogsPostId:task.platform==='zhihu'?task.zhihuArticleId:task.platform==='xiaohongshu'?undefined:task.csdnArticleId;}
 
 export function extractCsdnArticleId(draftUrl?:string){
   if(!draftUrl)return undefined;
@@ -31,7 +31,7 @@ export function isInterruptedTask(task:SyncTask){
   return['queued','checking-login','transforming'].includes(task.status)||(task.status==='writing'&&!!targetArticleId(task));
 }
 
-/** 新建草稿写入中断后无法判断服务端是否成功，自动重试可能产生重复草稿。 */
+/** 新建草稿写入中断后无法判断目标平台是否成功，自动重试可能产生重复草稿。 */
 export function isUncertainCreateTask(task:SyncTask){
   return task.status==='writing'&&!targetArticleId(task);
 }

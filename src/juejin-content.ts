@@ -20,7 +20,7 @@ const PLATFORM_META:Record<PlatformId,{name:string;badge:string;logo:string;chec
   wechat:{name:'微信公众号',badge:'图文草稿',logo:WECHAT_LOGO,check:'CHECK_WECHAT_STATUS',login:'OPEN_WECHAT_LOGIN'},
   cnblogs:{name:'博客园',badge:'随笔草稿',logo:CNBLOGS_LOGO,check:'CHECK_CNBLOGS_STATUS',login:'OPEN_CNBLOGS_LOGIN'},
   zhihu:{name:'知乎',badge:'文章草稿',logo:ZHIHU_LOGO,check:'CHECK_ZHIHU_STATUS',login:'OPEN_ZHIHU_LOGIN'},
-  xiaohongshu:{name:'小红书',badge:'图文草稿',logo:XIAOHONGSHU_LOGO,check:'CHECK_XIAOHONGSHU_STATUS',login:'OPEN_XIAOHONGSHU_LOGIN'}
+  xiaohongshu:{name:'小红书',badge:'本地图文草稿',logo:XIAOHONGSHU_LOGO,check:'CHECK_XIAOHONGSHU_STATUS',login:'OPEN_XIAOHONGSHU_LOGIN'}
 };
 let syncedIds:Promise<Set<string>>|undefined;
 let currentDialogRefresh:(()=>Promise<void>)|null=null;

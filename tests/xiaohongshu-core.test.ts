@@ -47,17 +47,17 @@ describe('小红书任务身份',()=>{
     expect(findMatchingTask([accountA,accountB],article,'xiaohongshu','xhs_c')).toBeUndefined();
   });
 
-  it('目标标识与不确定新建判定覆盖小红书',()=>{
-    expect(targetArticleId(task({xiaohongshuNoteId:'note-1'}))).toBe('note-1');
-    expect(isUncertainCreateTask(task({status:'writing',xiaohongshuNoteId:undefined}))).toBe(true);
-    expect(isUncertainCreateTask(task({status:'writing',xiaohongshuNoteId:'note-1'}))).toBe(false);
+  it('本地草稿标识不参与覆盖判断，写入中断始终需要确认',()=>{
+    expect(targetArticleId(task({xiaohongshuDraftId:'local-1'}))).toBeUndefined();
+    expect(isUncertainCreateTask(task({status:'writing'}))).toBe(true);
+    expect(isUncertainCreateTask(task({status:'writing',xiaohongshuDraftId:'local-1'}))).toBe(true);
   });
 });
 
 describe('小红书通知与健康度',()=>{
   it('成功通知目的地为小红书草稿箱',()=>{
-    const notification=buildTaskNotification(task({draftUrl:'https://creator.xiaohongshu.com/publish/publish?noteId=1',stats:{imageTotal:3,imageSucceeded:3,imageFailed:0,durationMs:1000}}),1000);
-    expect(notification).toMatchObject({kind:'saved',title:'文章已抵达 小红书草稿箱'});
+    const notification=buildTaskNotification(task({draftUrl:'https://creator.xiaohongshu.com/publish/publish',stats:{imageTotal:3,imageSucceeded:3,imageFailed:0,durationMs:1000}}),1000);
+    expect(notification).toMatchObject({kind:'saved',title:'文章已抵达 小红书本地草稿箱'});
   });
 
   it('小红书标记为 broken 时触发健康警示',()=>{

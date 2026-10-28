@@ -1,110 +1,61 @@
-// 小红书发布页驱动：填充标题/正文、逐张注入图片、点击存草稿，并等待页面回传笔记标识。
-// 选择器与按钮文案集中在此处，平台改版时只需修正一份常量。
-import {detectNoteStateFromText,parseXiaohongshuUser} from './targets/xiaohongshu-capture';
+// 小红书隔离世界驱动：独立图文页先传图后填表，只点击“暂存离开”并确认本地事务完成。
+import {normalizeXiaohongshuText,parseXiaohongshuUser} from './targets/xiaohongshu-capture';
 
 const RESPONSE_EVENT='article-ferry:xhs-response';
 const RESPONSE_ATTRIBUTE='data-article-ferry-xhs';
-const USER_INFO_ENDPOINTS=['https://creator.xiaohongshu.com/api/galaxy/user/info','https://creator.xiaohongshu.com/api/galaxy/user/self_info'];
-const DRAFT_MANAGER_URL='https://creator.xiaohongshu.com/new/note-manager?tab=draft';
-
-const TITLE_SELECTORS=[
-  'input[placeholder*="标题"]',
-  'textarea[placeholder*="标题"]',
-  'input[placeholder*="填写标题"]',
-  '.title-input input',
-  '.publish-title input'
-];
-const EDITOR_SELECTORS=[
-  '[contenteditable="true"]',
-  '.ql-editor',
-  '.editor-content [contenteditable="true"]',
-  '.publish-content [contenteditable="true"]'
-];
-const SAVE_BUTTON_TEXTS=['存草稿','保存草稿'];
-const FILE_INPUT_SELECTOR='input[type="file"]';
-
-type BridgeSession={accountId:string;account?:string};
-type BridgeSaveResult={ok:boolean;noteId?:string;message?:string};
-
-let lastUser:BridgeSession|undefined;
-let lastSave:BridgeSaveResult|undefined;
-let lastState:{state:string}|undefined;
-const waiters:Record<string,Array<(value:unknown)=>void>>={};
-
-const sleep=(ms:number)=>new Promise<void>(resolve=>setTimeout(resolve,ms));
-
-function emit(kind:string,value:unknown){
-  const pending=waiters[kind];
-  if(!pending)return;
-  waiters[kind]=[];
-  pending.forEach(resolve=>resolve(value));
-}
-
-function waitFor<T>(kind:string,timeoutMs:number):Promise<T|undefined>{
-  return new Promise<T|undefined>(resolve=>{
-    let settled=false;
-    const finish=(value:T|undefined)=>{
-      if(settled)return;
-      settled=true;
-      resolve(value);
-    };
-    const timer=setTimeout(()=>finish(undefined),timeoutMs);
-    (waiters[kind]||=[]).push(value=>{
-      clearTimeout(timer);
-      finish(value as T);
-    });
-  });
-}
-
-/** 主世界通过 documentElement 属性共享响应数据；事件仅作唤醒信号。 */
-function onPageResponse(){
-  const raw=document.documentElement.getAttribute(RESPONSE_ATTRIBUTE);
-  if(!raw)return;
-  document.documentElement.removeAttribute(RESPONSE_ATTRIBUTE);
-  try{
-    const payload=JSON.parse(raw) as {kind?:string;accountId?:string;account?:string;ok?:boolean;noteId?:string;message?:string;state?:string};
-    if(payload.kind==='user'&&payload.accountId){
-      lastUser={accountId:payload.accountId,account:payload.account};
-      emit('user',lastUser);
-    }else if(payload.kind==='note-save'){
-      lastSave={ok:payload.ok===true,noteId:payload.noteId,message:payload.message};
-      emit('note-save',lastSave);
-    }else if(payload.kind==='note-state'&&payload.state){
-      lastState={state:payload.state};
-      emit('note-state',lastState);
-    }
-  }catch{
-    // 页面数据异常时静默忽略，由上层超时兜底。
+const COMMAND_EVENT='article-ferry:xhs-command';
+const COMMAND_ATTRIBUTE='data-article-ferry-xhs-command';
+const ACK_ATTRIBUTE='data-article-ferry-xhs-ack';
+const USER_INFO_ENDPOINT='https://creator.xiaohongshu.com/api/galaxy/user/info';
+const TITLE_SELECTORS=['input[placeholder*="标题"]','textarea[placeholder*="标题"]'];
+const EDITOR_SELECTORS=['.ProseMirror[contenteditable="true"]'];
+// 首图入口与编辑区追加入口不同；只选 multiple，避免误改封面或替换单图。
+const FILE_INPUT_SELECTORS=['.img-list input[type="file"][multiple]','input.upload-input[type="file"][multiple][accept*=".jpg"]'];
+const IMAGE_SELECTOR='.img-preview-area .img-container';
+function findFileInput(){
+  for(const selector of FILE_INPUT_SELECTORS){
+    const input=document.querySelector<HTMLInputElement>(selector);
+    if(input)return input;
   }
 }
+const sleep=(ms:number)=>new Promise<void>(resolve=>setTimeout(resolve,ms));
 
-if(typeof document!=='undefined')document.addEventListener(RESPONSE_EVENT,onPageResponse);
+function isVisible(element:Element){
+  const rect=element.getBoundingClientRect();
+  const style=getComputedStyle(element);
+  return rect.width>0&&rect.height>0&&rect.right>0&&rect.bottom>0&&style.visibility!=='hidden'&&style.display!=='none'&&style.opacity!=='0'&&!element.closest('[aria-hidden="true"]');
+}
 
 function findFirst<T extends Element>(selectors:string[]):T|undefined{
   for(const selector of selectors){
-    const element=document.querySelector<T>(selector);
+    const element=[...document.querySelectorAll<T>(selector)].find(isVisible);
     if(element)return element;
   }
-  return undefined;
 }
 
 async function waitForElement<T extends Element>(selectors:string[],timeoutMs:number):Promise<T|undefined>{
-  const start=Date.now();
-  while(Date.now()-start<timeoutMs){
+  const end=Date.now()+timeoutMs;
+  while(Date.now()<end){
     const element=findFirst<T>(selectors);
     if(element)return element;
     await sleep(200);
   }
-  return undefined;
 }
 
-/** 只按文案匹配存草稿按钮；即使页面同时存在「发布」，也不会被点击。 */
+/** 精确匹配真实页面的保存文案，不匹配“发布”或包含额外动作的按钮。 */
 function findSaveButton(){
-  const candidates=[...document.querySelectorAll<HTMLElement>('button,[role="button"],a,.btn')];
-  return candidates.find(button=>{
-    const text=(button.textContent||'').replace(/\s+/g,'');
-    return SAVE_BUTTON_TEXTS.some(target=>text===target||text.includes(target));
-  });
+  return [...document.querySelectorAll<HTMLButtonElement>('button')].find(button=>isVisible(button)&&!button.disabled&&(button.textContent||'').replace(/\s+/g,'')==='暂存离开');
+}
+
+async function prepareImageNote(){
+  const end=Date.now()+20000;
+  while(Date.now()<end){
+    if(findFileInput())return{ok:true};
+    const tab=[...document.querySelectorAll<HTMLElement>('.creator-tab')].find(element=>isVisible(element)&&(element.textContent||'').trim()==='上传图文');
+    if(tab)tab.click();
+    await sleep(300);
+  }
+  return{ok:false,message:'未找到小红书图文上传入口，页面可能已改版'};
 }
 
 function setInputValue(input:HTMLInputElement|HTMLTextAreaElement,value:string){
@@ -121,7 +72,7 @@ function setInputValue(input:HTMLInputElement|HTMLTextAreaElement,value:string){
 
 /**
  * 富文本编辑器优先用 execCommand 模拟真实输入；框架未接管时退回 textContent + input 事件。
- * 返回是否写入后仍为空，供调用方判定页面是否已就绪。
+ * 核对编辑器是否接受完整正文，避免只写入 DOM 就报告完成。
  */
 function insertEditorText(editor:HTMLElement,text:string){
   editor.focus();
@@ -138,10 +89,10 @@ function insertEditorText(editor:HTMLElement,text:string){
     // 继续走兜底路径。
   }
   const written=(editor.innerText||editor.textContent||'').trim();
-  if(written.length>=Math.min(text.length,10))return true;
+  if(normalizeXiaohongshuText(written)===normalizeXiaohongshuText(text))return true;
   editor.textContent=text;
   try{editor.dispatchEvent(new InputEvent('input',{bubbles:true,inputType:'insertText',data:text}));}catch{editor.dispatchEvent(new Event('input',{bubbles:true}));}
-  return (editor.innerText||editor.textContent||'').trim().length>0;
+  return normalizeXiaohongshuText(editor.innerText||editor.textContent||'')===normalizeXiaohongshuText(text);
 }
 
 function dataUrlToFile(base64:string,mime:string,name:string){
@@ -162,105 +113,109 @@ function injectFile(input:HTMLInputElement,file:File){
   input.dispatchEvent(new Event('change',{bubbles:true}));
 }
 
+/** 每次重新读取用户接口，避免缓存账号掩盖页面中的账号切换。 */
 async function getSession(){
-  if(lastUser)return{ok:true,loggedIn:true,account:lastUser.account,accountId:lastUser.accountId};
-  const fromPage=await waitFor<BridgeSession>('user',3000);
-  if(fromPage)return{ok:true,loggedIn:true,account:fromPage.account,accountId:fromPage.accountId};
-  for(const endpoint of USER_INFO_ENDPOINTS){
-    try{
-      const response=await fetch(endpoint,{credentials:'include',signal:AbortSignal.timeout(7000)});
-      if(response.status===401||response.status===403)return{ok:true,loggedIn:false};
-      if(!response.ok)continue;
-      const contentType=response.headers.get('content-type')||'';
-      if(!/json/i.test(contentType))return{ok:true,loggedIn:false};
+  try{
+    const response=await fetch(USER_INFO_ENDPOINT,{credentials:'include',signal:AbortSignal.timeout(7000)});
+    if(response.status===401)return{ok:true,loggedIn:false};
+    if(response.ok&&/json/i.test(response.headers.get('content-type')||'')){
       const user=parseXiaohongshuUser(await response.json());
-      if(user){
-        lastUser=user;
-        return{ok:true,loggedIn:true,account:user.account,accountId:user.accountId};
-      }
-    }catch{
-      // 尝试下一个探针。
+      if(user)return{ok:true,loggedIn:true,...user};
     }
-  }
-  return{ok:false,loggedIn:false,message:'无法检测小红书登录状态，请确认已登录创作服务平台'};
+  }catch{/* 读取失败时返回未确认状态，禁止使用旧账号缓存。 */}
+  return{ok:false,loggedIn:false,message:'无法确认小红书当前账号，请打开创作服务平台检查登录状态'};
 }
 
 async function waitEditor(timeoutMs=20000){
   const editor=await waitForElement<HTMLElement>(EDITOR_SELECTORS,timeoutMs);
-  if(!editor)return{ok:false,message:'小红书发布页加载超时，请检查网络或重新登录'};
-  const titleInput=await waitForElement<HTMLInputElement|HTMLTextAreaElement>(TITLE_SELECTORS,5000);
-  if(!titleInput)return{ok:false,message:'未找到小红书标题输入框，页面可能已改版'};
-  return{ok:true};
+  const titleInput=editor&&await waitForElement<HTMLInputElement|HTMLTextAreaElement>(TITLE_SELECTORS,5000);
+  return titleInput?{ok:true}:{ok:false,message:'未找到小红书图文编辑器，请检查图片是否上传成功'};
 }
 
-async function fillText(payload:{title?:string;body?:string}|undefined){
+async function fillText(payload:{title?:string;body?:string}){
   const title=String(payload?.title||'');
   const body=String(payload?.body||'');
   if(!title.trim()||!body.trim())return{ok:false,message:'小红书标题或正文为空，已阻止写入'};
-  const titleInput=await waitForElement<HTMLInputElement|HTMLTextAreaElement>(TITLE_SELECTORS,15000);
-  const editor=await waitForElement<HTMLElement>(EDITOR_SELECTORS,15000);
+  const titleInput=findFirst<HTMLInputElement|HTMLTextAreaElement>(TITLE_SELECTORS);
+  const editor=findFirst<HTMLElement>(EDITOR_SELECTORS);
   if(!titleInput||!editor)return{ok:false,message:'未找到小红书标题或正文编辑器，页面可能已改版'};
   setInputValue(titleInput,title);
-  const accepted=insertEditorText(editor,body);
+  if(!insertEditorText(editor,body))return{ok:false,message:'小红书编辑器未完整接受正文'};
   await sleep(400);
-  if(!titleInput.value?.trim())return{ok:false,message:'小红书标题输入框未接受输入，请刷新发布页后重试'};
-  if(!accepted)return{ok:false,message:'小红书正文编辑器未接受输入，页面可能已改版'};
-  return{ok:true,titleLength:titleInput.value.length,bodyLength:(editor.innerText||editor.textContent||'').trim().length};
+  return normalizeXiaohongshuText(titleInput.value)===normalizeXiaohongshuText(title)&&normalizeXiaohongshuText(editor.innerText||'')===normalizeXiaohongshuText(body)
+    ?{ok:true}:{ok:false,message:'小红书编辑器内容与文章不一致，请检查本地草稿'};
 }
 
-async function uploadImage(payload:{base64?:string;mime?:string;name?:string}|undefined){
-  const input=await waitForElement<HTMLInputElement>(['input[type="file"]'],10000)??document.querySelector<HTMLInputElement>(FILE_INPUT_SELECTOR);
+async function uploadImage(payload:{base64:string;mime:string;name:string;imageCount:number}){
+  const input=findFileInput();
   if(!input)return{ok:false,message:'未找到小红书图片上传入口，页面可能已改版'};
-  const base64=String(payload?.base64||'');
-  if(!base64)return{ok:false,message:'图片内容为空'};
-  let file:File;
-  try{
-    file=dataUrlToFile(base64,String(payload?.mime||'image/png'),String(payload?.name||'image.png'));
-  }catch{
-    return{ok:false,message:'图片解码失败'};
-  }
+  const file=dataUrlToFile(payload.base64,payload.mime,payload.name);
   if(!file.size)return{ok:false,message:'图片内容为空'};
   injectFile(input,file);
-  await sleep(1200);
-  return{ok:true};
+  // 真实上传状态和图片数在图文编辑区确认；最终保存还会核对平台写入的完整 fileId 列表。
+  const end=Date.now()+45000;
+  while(Date.now()<end){
+    const images=[...document.querySelectorAll(IMAGE_SELECTOR)];
+    if(images.some(image=>image.querySelector('.mask.failed')))return{ok:false,message:'小红书图片上传失败，请检查保留的编辑页'};
+    if(images.length===payload.imageCount&&images.every(image=>!image.querySelector('.mask.uploading,.processing-container'))&&findFirst(EDITOR_SELECTORS))return{ok:true};
+    await sleep(300);
+  }
+  return{ok:false,message:'小红书图片上传超时，请检查保留的编辑页'};
 }
 
-async function saveNote(){
-  const button=findSaveButton();
-  if(!button)return{ok:false,message:'未找到「存草稿」按钮，请确认已进入小红书图文发布页'};
-  // 先挂等待再点击：保存响应可能在 click 同步链路里就被页面脚本回传。
-  const pending=waitFor<BridgeSaveResult>('note-save',45000);
-  lastSave=undefined;
-  button.click();
-  const result=await pending;
-  if(!result)return{ok:false,uncertain:true,message:'等待小红书保存结果超时，请先检查草稿箱，不要直接重复同步'};
-  if(!result.ok)return{ok:false,message:result.message||'小红书保存失败'};
-  return{ok:true,noteId:result.noteId,draftUrl:location.href||DRAFT_MANAGER_URL};
+/** 点击前武装只读事务观测，必须收到本次请求的保存凭证才报告成功。 */
+async function saveNote(payload:{accountId:string;title:string;body:string;imageCount:number}){
+  const end=Date.now()+10000;
+  let button=findSaveButton();
+  while(!button&&Date.now()<end){await sleep(200);button=findSaveButton();}
+  if(!button)return{ok:false,message:'未找到可用的“暂存离开”按钮，请检查图片上传状态'};
+  const requestId=crypto.randomUUID();
+  const root=document.documentElement;
+  return new Promise(resolve=>{
+    let settled=false;
+    const finish=(result:unknown)=>{
+      if(settled)return;
+      settled=true;
+      clearTimeout(timer);
+      document.removeEventListener(RESPONSE_EVENT,onResponse);
+      root.setAttribute(COMMAND_ATTRIBUTE,JSON.stringify({requestId,cancel:true}));
+      document.dispatchEvent(new Event(COMMAND_EVENT));
+      resolve(result);
+    };
+    const onResponse=()=>{
+      const raw=root.getAttribute(RESPONSE_ATTRIBUTE);
+      if(!raw)return;
+      try{
+        const result=JSON.parse(raw);
+        if(result.requestId===requestId)finish(result);
+      }catch{/* 不相关或异常响应由超时处理。 */}
+    };
+    const timer=setTimeout(()=>finish({ok:false,message:'等待小红书本地保存结果超时，请先检查当前浏览器的草稿箱'}),45000);
+    document.addEventListener(RESPONSE_EVENT,onResponse);
+    root.setAttribute(COMMAND_ATTRIBUTE,JSON.stringify({requestId,...payload}));
+    document.dispatchEvent(new Event(COMMAND_EVENT));
+    const armed=root.getAttribute(ACK_ATTRIBUTE)===requestId;
+    root.removeAttribute(ACK_ATTRIBUTE);
+    if(!armed){finish({ok:false,message:'本地草稿观测器未就绪，请刷新小红书发布页后重试'});return;}
+    try{button.click();}catch{finish({ok:false,message:'无法点击小红书暂存按钮，请检查保留的编辑页'});}
+  });
 }
 
-async function checkNote(){
-  if(lastState?.state)return{ok:true,state:lastState.state};
-  const text=document.body?.innerText||'';
-  return{ok:true,state:detectNoteStateFromText(text)};
-}
-
-function handleAction(action:string,payload:any){
+async function handleAction(action:string,payload:any){
   switch(action){
-    case 'PING':return Promise.resolve({ok:true});
+    case 'PING':return{ok:true};
     case 'GET_SESSION':return getSession();
+    case 'PREPARE_IMAGE_NOTE':return prepareImageNote();
     case 'WAIT_EDITOR':return waitEditor(Number(payload?.timeoutMs)||20000);
     case 'FILL_TEXT':return fillText(payload);
     case 'UPLOAD_IMAGE':return uploadImage(payload);
-    case 'SAVE_NOTE':return saveNote();
-    case 'CHECK_NOTE':return checkNote();
-    default:return Promise.resolve({ok:false,message:`未知动作: ${action}`});
+    case 'SAVE_NOTE':return saveNote(payload);
+    default:return{ok:false,message:`未知动作: ${action}`};
   }
 }
 
 chrome.runtime.onMessage.addListener((message:any,_sender:chrome.runtime.MessageSender,sendResponse:(response:any)=>void)=>{
   if(message?.target!=='xiaohongshu-bridge')return;
-  handleAction(String(message.action||''),message.payload)
-    .then(sendResponse)
-    .catch(error=>sendResponse({ok:false,message:(error as Error)?.message||String(error)}));
+  handleAction(String(message.action||''),message.payload).then(sendResponse).catch(error=>sendResponse({ok:false,message:(error as Error)?.message||String(error)}));
   return true;
 });
