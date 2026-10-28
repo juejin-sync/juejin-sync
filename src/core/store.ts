@@ -1,4 +1,5 @@
-import type {CnblogsDraftMapping,CsdnDraftMapping,ExtensionSettings,PlatformId,SyncTask,WechatDraftMapping,XiaohongshuDraftMapping,ZhihuDraftMapping} from '../types';
+// 任务与远端草稿映射存储；小红书本地草稿只保留任务结果，不建立覆盖映射。
+import type {CnblogsDraftMapping,CsdnDraftMapping,ExtensionSettings,PlatformId,SyncTask,WechatDraftMapping,ZhihuDraftMapping} from '../types';
 import {defaultSettings,normalizeSettings} from './settings';
 import {articleIdentityKeys,isActiveTask,taskAccountId} from './task';
 import {Semaphore} from './async';
@@ -56,18 +57,18 @@ function draftMappingValue(articleId:string,targetId:string,draftUrl?:string,pla
       ?{articleId,cnblogsAccountId:accountId,cnblogsPostId:targetId,draftUrl,updatedAt:new Date().toISOString()}
       :platform==='zhihu'
         ?{articleId,zhihuAccountId:accountId,zhihuArticleId:targetId,draftUrl,updatedAt:new Date().toISOString()}
-        :platform==='xiaohongshu'
-          ?{articleId,xiaohongshuAccountId:accountId,xiaohongshuNoteId:targetId,draftUrl,updatedAt:new Date().toISOString()}
-          :{articleId,csdnArticleId:targetId,draftUrl,updatedAt:new Date().toISOString()};
+        :{articleId,csdnArticleId:targetId,draftUrl,updatedAt:new Date().toISOString()};
   return{key:prefix+articleId,data};
 }
 export async function saveDraftMapping(articleId:string,targetId:string,draftUrl?:string,platform:PlatformId='csdn',accountId?:string){
+  if(platform==='xiaohongshu')return;
   const mapping=draftMappingValue(articleId,targetId,draftUrl,platform,accountId);
   await chrome.storage.local.set({[mapping.key]:mapping.data});
 }
 export async function getDraftMapping(articleId:string,platform:PlatformId='csdn',accountId?:string){
+  if(platform==='xiaohongshu')return undefined;
   const prefix=mappingPrefix(platform,accountId);
-  return(await chrome.storage.local.get(prefix+articleId))[prefix+articleId] as (CsdnDraftMapping&WechatDraftMapping&CnblogsDraftMapping&ZhihuDraftMapping&XiaohongshuDraftMapping)|undefined;
+  return(await chrome.storage.local.get(prefix+articleId))[prefix+articleId] as (CsdnDraftMapping&WechatDraftMapping&CnblogsDraftMapping&ZhihuDraftMapping)|undefined;
 }
 export async function saveArticleDraftMapping(article:SyncTask['article'],targetId:string,draftUrl?:string,platform:PlatformId='csdn',accountId?:string){
   for(const identity of articleIdentityKeys(article))await saveDraftMapping(identity,targetId,draftUrl,platform,accountId);
@@ -91,7 +92,6 @@ async function persistTaskMapping(task:SyncTask){
   else if(task.platform==='wechat'&&task.wechatAppMsgId)await saveArticleDraftMapping(task.article,task.wechatAppMsgId,task.draftUrl,'wechat',task.wechatAccountId);
   else if(task.platform==='cnblogs'&&task.cnblogsPostId)await saveArticleDraftMapping(task.article,task.cnblogsPostId,task.draftUrl,'cnblogs',task.cnblogsAccountId);
   else if(task.platform==='zhihu'&&task.zhihuArticleId)await saveArticleDraftMapping(task.article,task.zhihuArticleId,task.draftUrl,'zhihu',task.zhihuAccountId);
-  else if(task.platform==='xiaohongshu'&&task.xiaohongshuNoteId)await saveArticleDraftMapping(task.article,task.xiaohongshuNoteId,task.draftUrl,'xiaohongshu',task.xiaohongshuAccountId);
 }
 export async function preserveTaskMappings(tasks:SyncTask[]){
   for(const task of tasks)await persistTaskMapping(task);
@@ -117,7 +117,8 @@ export async function finishSavedTask(id:string,targetId:string,draftUrl:string,
   if(!task)throw new Error('任务记录已丢失，无法保存草稿结果');
   Object.assign(task,patch,{status:'saved',updatedAt:new Date().toISOString()});
   const values:Record<string,unknown>={[KEY]:tasks.slice(0,200).map(toStorageTask)};
-  for(const identity of articleIdentityKeys(task.article)){
+  // 小红书仅记录本地保存凭证，不建立用于覆盖更新的文章映射。
+  for(const identity of task.platform==='xiaohongshu'?[]:articleIdentityKeys(task.article)){
     const mapping=draftMappingValue(identity,targetId,draftUrl,task.platform,taskAccountId(task));
     values[mapping.key]=mapping.data;
   }

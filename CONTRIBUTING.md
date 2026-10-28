@@ -19,9 +19,9 @@ Bug 报告请包含浏览器版本、失效页面、复现步骤和经过脱敏�
 
 ### 🤖 AI 辅助与结对编程规范 (AI-Assisted Pair Programming)
 
-本项目倡导现代化的 AI-Native 协作实践，鼓励借助 Claude、Cursor 等 AI 编码工具提升开发效率、优化架构与完善单测：
+本项目倡导现代化的 AI-Native 协作实践，鼓励借助 Codex、Claude、Cursor 等 AI 编码工具提升开发效率、优化架构与完善单测：
 
-1. **联合署名倡议**：若提交的 PR 包含实质性 AI 辅助重构或代码生成，推荐在 Commit Message 结尾添加标准的 Git Trailer 署名（如 `Co-Authored-By: Claude Code <noreply@anthropic.com>`），以保持开源研发历史的透明与可追溯；
+1. **联合署名倡议**：若提交的 PR 包含实质性 AI 辅助重构或代码生成，推荐在 Commit Message 结尾添加标准的 Git Trailer 署名（如 `Co-Authored-By: Codex <noreply@openai.com>` 或 `Co-Authored-By: Claude Code <noreply@anthropic.com>`），以保持开源研发历史的透明与可追溯；
 2. **端侧安全底线**：无论是否使用 AI 生成代码，均须严守“零 Cookie 收集、零服务端中转、零敏感数据上报”的端侧隐私底线；
 3. **工程质量把关**：所有 AI 参与产出的代码必须通过本地完整的静态类型检查与全量自动化测试（`npm run check && npm test`）。
 

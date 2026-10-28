@@ -15,7 +15,7 @@ export function buildTaskNotification(task:SyncTask,durationMs:number):TaskNotif
   const title=task.article.title;
   if(task.status==='saved'){
     const imageStats=task.stats?.imageTotal?`，转存图片 ${task.stats.imageSucceeded}/${task.stats.imageTotal}`:'';
-    const destination=task.platform==='csdn'?'CSDN 草稿箱':`${platformLabel(task.platform)}草稿箱`;
+    const destination=task.platform==='xiaohongshu'?'小红书本地草稿箱':task.platform==='csdn'?'CSDN 草稿箱':`${platformLabel(task.platform)}草稿箱`;
     return{id:task.id,kind:'saved',title:`文章已抵达 ${destination}`,message:`「${title}」保存成功${imageStats}`,draftUrl:task.draftUrl};
   }
   if(task.status==='failed'||task.status==='needs-user'){

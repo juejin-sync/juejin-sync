@@ -6,8 +6,8 @@ const platform=vi.hoisted(()=>({
   accountId:'xhs_a' as string,
   loggedIn:true,
   mode:'success' as 'success'|'uncertain'|'fail',
-  noteState:'draft' as 'draft'|'published'|'missing'|'unauthorized'|'unknown',
   writes:0,
+  progressStatus:undefined as string|undefined,
   lastNoteId:undefined as string|undefined
 }));
 
@@ -19,27 +19,27 @@ vi.mock('../src/targets/xiaohongshu-api',async()=>{
       account:platform.loggedIn?platform.account:undefined,
       accountId:platform.loggedIn?platform.accountId:undefined
     }),
-    fetchXiaohongshuNoteState:async(_noteId:string,expectedAccountId?:string)=>{
-      if(expectedAccountId&&expectedAccountId!==platform.accountId)return 'unauthorized';
-      return platform.noteState;
-    },
     saveXiaohongshuDraft:async(_article:any,options:any)=>{
       const {SyncError}=await import('../src/core/diagnostic');
       if(options.expectedAccountId&&options.expectedAccountId!==platform.accountId){
         throw new SyncError('当前登录的小红书账号与目标账号不一致','blocked','authentication');
       }
+      if(platform.mode==='fail'){
+        throw new SyncError('小红书图片校验失败','content','images');
+      }
+      await options.onSaving?.();
+      await options.onProgress?.({current:0,total:1,message:'正在上传图片'});
+      const {allTasks}=await import('../src/core/store');
+      platform.progressStatus=(await allTasks())[0]?.status;
       platform.writes++;
       if(platform.mode==='uncertain'){
         throw new SyncError('等待小红书保存结果超时，请先检查草稿箱，不要直接重复同步','interrupted','draft');
       }
-      if(platform.mode==='fail'){
-        throw new SyncError('小红书编辑器填充失败，页面可能已改版','platform-change','content');
-      }
-      const noteId=options.noteId||`note-${platform.accountId}`;
+      const noteId=`local-${platform.accountId}-${platform.writes}`;
       platform.lastNoteId=noteId;
       return{
         articleId:noteId,
-        draftUrl:`https://creator.xiaohongshu.com/publish/publish?noteId=${noteId}`,
+        draftUrl:'https://creator.xiaohongshu.com/publish/publish',
         warnings:[],
         stats:{imageTotal:0,imageSucceeded:0,imageFailed:0}
       };
@@ -70,8 +70,8 @@ beforeEach(async()=>{
   platform.accountId='xhs_a';
   platform.loggedIn=true;
   platform.mode='success';
-  platform.noteState='draft';
   platform.writes=0;
+  platform.progressStatus=undefined;
   platform.lastNoteId=undefined;
   store={syncTasks:[]};
   sessionStore={};
@@ -110,42 +110,28 @@ afterEach(()=>{
 });
 
 describe('后台小红书同步消息链路', ()=>{
-  it('首次同步保存草稿并写入账号维度的草稿映射',async()=>{
+  it('首次保存只记录本地 draftId，不建立远端映射',async()=>{
     const result=await send({type:'SYNC_NEW_ARTICLE',platform:'xiaohongshu',article,accountId:'xhs_a'});
     expect(result.ok).toBe(true);
-    expect(result.task).toMatchObject({platform:'xiaohongshu',status:'saved',xiaohongshuAccountId:'xhs_a',xiaohongshuNoteId:'note-xhs_a'});
-    expect(store['xiaohongshuDraftMapping:xhs_a:source']).toMatchObject({xiaohongshuNoteId:'note-xhs_a',xiaohongshuAccountId:'xhs_a'});
+    expect(result.task).toMatchObject({platform:'xiaohongshu',status:'saved',xiaohongshuAccountId:'xhs_a',xiaohongshuDraftId:'local-xhs_a-1'});
+    expect(store['xiaohongshuDraftMapping:xhs_a:source']).toBeUndefined();
+    expect(platform.progressStatus).toBe('writing');
   });
 
-  it('切换小红书账号时按账号隔离保存映射',async()=>{
+  it('重复同步始终新建，不读取旧版本远端映射或要求确认覆盖',async()=>{
+    store['xiaohongshuDraftMapping:xhs_a:source']={articleId:'source',xiaohongshuNoteId:'legacy-note'};
+    await send({type:'SYNC_NEW_ARTICLE',platform:'xiaohongshu',article,accountId:'xhs_a'});
+    const result=await send({type:'SYNC_NEW_ARTICLE',platform:'xiaohongshu',article,accountId:'xhs_a'});
+    expect(result.task).toMatchObject({status:'saved',xiaohongshuDraftId:'local-xhs_a-2'});
+    expect(platform.writes).toBe(2);
+  });
+
+  it('切换账号后任务独立，各自保存新草稿',async()=>{
     await send({type:'SYNC_NEW_ARTICLE',platform:'xiaohongshu',article,accountId:'xhs_a'});
     platform.accountId='xhs_b';
     await send({type:'SYNC_NEW_ARTICLE',platform:'xiaohongshu',article,accountId:'xhs_b'});
-    expect(store['xiaohongshuDraftMapping:xhs_a:source'].xiaohongshuNoteId).toBe('note-xhs_a');
-    expect(store['xiaohongshuDraftMapping:xhs_b:source'].xiaohongshuNoteId).toBe('note-xhs_b');
-  });
-
-  it('原笔记已发布时阻断更新',async()=>{
-    store['xiaohongshuDraftMapping:xhs_a:source']={articleId:'source',xiaohongshuAccountId:'xhs_a',xiaohongshuNoteId:'published-note'};
-    platform.noteState='published';
-    const result=await send({type:'SYNC_NEW_ARTICLE',platform:'xiaohongshu',article,accountId:'xhs_a'});
-    expect(result.ok).toBe(false);
-    expect(result.message).toContain('已发布');
-    const failed=(store.syncTasks as any[])[0];
-    expect(failed.status).toBe('needs-user');
-    expect(failed.diagnostic.category).toBe('blocked');
-    expect(platform.writes).toBe(0);
-  });
-
-  it('笔记状态无法确认时暂停更新，避免覆盖',async()=>{
-    store['xiaohongshuDraftMapping:xhs_a:source']={articleId:'source',xiaohongshuAccountId:'xhs_a',xiaohongshuNoteId:'unknown-note'};
-    platform.noteState='unknown';
-    const result=await send({type:'SYNC_NEW_ARTICLE',platform:'xiaohongshu',article,accountId:'xhs_a'});
-    expect(result.ok).toBe(false);
-    expect(result.message).toContain('无法确认小红书笔记仍是草稿');
-    const failed=(store.syncTasks as any[])[0];
-    expect(failed.status).toBe('needs-user');
-    expect(platform.writes).toBe(0);
+    expect(store.syncTasks).toHaveLength(2);
+    expect(store.syncTasks.map((task:any)=>task.xiaohongshuAccountId).sort()).toEqual(['xhs_a','xhs_b']);
   });
 
   it('保存结果不确定时标记为需要人工确认，并阻止自动重复创建',async()=>{
@@ -174,19 +160,29 @@ describe('后台小红书同步消息链路', ()=>{
     expect(retry.ok).toBe(true);
     await vi.advanceTimersByTimeAsync(100);
     const saved=(store.syncTasks as any[]).find(task=>task.id===failedTask.id);
-    expect(saved).toMatchObject({status:'saved',xiaohongshuNoteId:'note-xhs_a'});
-    expect(store['xiaohongshuDraftMapping:xhs_a:source'].xiaohongshuNoteId).toBe('note-xhs_a');
+    expect(saved).toMatchObject({status:'saved',xiaohongshuDraftId:'local-xhs_a-2'});
+    expect(store['xiaohongshuDraftMapping:xhs_a:source']).toBeUndefined();
   });
 
   it('内容校验失败时归类为内容异常且不写远端',async()=>{
     platform.mode='fail';
     const result=await send({type:'SYNC_NEW_ARTICLE',platform:'xiaohongshu',article,accountId:'xhs_a'});
     expect(result.ok).toBe(false);
-    expect(result.message).toContain('小红书编辑器填充失败');
+    expect(result.message).toContain('小红书图片校验失败');
     const failed=(store.syncTasks as any[])[0];
     expect(failed.status).toBe('failed');
-    expect(failed.diagnostic).toMatchObject({category:'platform-change',stage:'content'});
-    expect(platform.writes).toBe(1);
+    expect(failed.diagnostic).toMatchObject({category:'content',stage:'images'});
+    expect(platform.writes).toBe(0);
+  });
+
+  it('重启恢复 writing 任务时需要人工核对，即使有旧保存凭证也不重新上传',async()=>{
+    const now=new Date().toISOString();
+    store.syncTasks=[{id:'interrupted',article,platform:'xiaohongshu',xiaohongshuAccountId:'xhs_a',xiaohongshuDraftId:'old-local',status:'writing',createdAt:now,updatedAt:now,attempts:1}];
+    vi.resetModules();
+    await import('../src/background');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(store.syncTasks[0]).toMatchObject({status:'needs-user',diagnostic:{category:'interrupted',stage:'recovery'}});
+    expect(platform.writes).toBe(0);
   });
 
   it('无法取得账号标识时拒绝创建任务',async()=>{
