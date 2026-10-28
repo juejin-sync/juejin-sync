@@ -1,11 +1,11 @@
 {
   "manifest_version": 3,
   "name": "掘金同步助手",
-  "version": "1.5.1",
-  "description": "将掘金文章同步到 CSDN、微信公众号、博客园与知乎专栏草稿箱。",
+  "version": "1.6.0",
+  "description": "将掘金文章同步到 CSDN、微信公众号、博客园、知乎与小红书草稿箱。",
   "icons": {"16":"logo-16.png","32":"logo-32.png","48":"logo-48.png","128":"logo-128.png"},
   "permissions": ["storage", "notifications", "alarms", "declarativeNetRequestWithHostAccess", "offscreen"],
-  "host_permissions": ["https://juejin.cn/*", "https://*.juejin.cn/*", "https://*.byteimg.com/*", "https://*.bytecdn.cn/*", "https://bizapi.csdn.net/*", "https://*.myhuaweicloud.com/*", "https://mp.weixin.qq.com/*", "https://i.cnblogs.com/*", "https://upload.cnblogs.com/*", "https://zhuanlan.zhihu.com/*", "https://www.zhihu.com/*", "https://api.zhihu.com/*", "https://zhihu-pics-upload.zhimg.com/*", "https://*.zhimg.com/*"],
+  "host_permissions": ["https://juejin.cn/*", "https://*.juejin.cn/*", "https://*.byteimg.com/*", "https://*.bytecdn.cn/*", "https://bizapi.csdn.net/*", "https://*.myhuaweicloud.com/*", "https://mp.weixin.qq.com/*", "https://i.cnblogs.com/*", "https://upload.cnblogs.com/*", "https://zhuanlan.zhihu.com/*", "https://www.zhihu.com/*", "https://api.zhihu.com/*", "https://zhihu-pics-upload.zhimg.com/*", "https://*.zhimg.com/*", "https://creator.xiaohongshu.com/*", "https://*.xiaohongshu.com/*", "https://*.xhscdn.com/*"],
   "declarative_net_request": {
     "rule_resources": [{"id":"csdn_headers","enabled":true,"path":"rules.json"}]
   },
@@ -15,6 +15,8 @@
   "content_scripts": [
     {"matches":["https://juejin.cn/*"],"js":["juejin-page.js"],"run_at":"document_idle","world":"MAIN"},
     {"matches":["https://juejin.cn/*"],"js":["juejin-content.js"],"css":["juejin-content.css"],"run_at":"document_idle"},
-    {"matches":["https://zhuanlan.zhihu.com/*"],"js":["zhihu-bridge.js"],"run_at":"document_idle"}
+    {"matches":["https://zhuanlan.zhihu.com/*"],"js":["zhihu-bridge.js"],"run_at":"document_idle"},
+    {"matches":["https://creator.xiaohongshu.com/*"],"js":["xiaohongshu-page.js"],"run_at":"document_idle","world":"MAIN"},
+    {"matches":["https://creator.xiaohongshu.com/*"],"js":["xiaohongshu-bridge.js"],"run_at":"document_idle"}
   ]
 }

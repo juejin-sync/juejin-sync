@@ -1,5 +1,6 @@
 // 任务完成系统通知：仅长耗时任务触发，避免高频打扰；文案使用脱敏诊断信息。
 import type {SyncTask} from '../types';
+import {platformLabel} from './message';
 
 export const NOTIFY_DURATION_MS=10000;
 export const NOTIFY_IMAGE_COUNT=3;
@@ -14,7 +15,7 @@ export function buildTaskNotification(task:SyncTask,durationMs:number):TaskNotif
   const title=task.article.title;
   if(task.status==='saved'){
     const imageStats=task.stats?.imageTotal?`，转存图片 ${task.stats.imageSucceeded}/${task.stats.imageTotal}`:'';
-    const destination=task.platform==='wechat'?'微信公众号草稿箱':task.platform==='cnblogs'?'博客园草稿箱':task.platform==='zhihu'?'知乎草稿箱':'CSDN 草稿箱';
+    const destination=task.platform==='csdn'?'CSDN 草稿箱':`${platformLabel(task.platform)}草稿箱`;
     return{id:task.id,kind:'saved',title:`文章已抵达 ${destination}`,message:`「${title}」保存成功${imageStats}`,draftUrl:task.draftUrl};
   }
   if(task.status==='failed'||task.status==='needs-user'){

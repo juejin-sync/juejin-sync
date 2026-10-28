@@ -10,6 +10,6 @@ const common={bundle:true,minify:release,target:'chrome120',outdir:'dist',source
 // manifest.content_scripts 不支持 ESM；源文件为单元测试导出的函数也必须打包进普通脚本。
 const builds=[
   {...common,entryPoints:{background:'src/background.ts',popup:'src/popup.ts',offscreen:'src/offscreen.ts'},format:'esm'},
-  {...common,entryPoints:{'juejin-page':'src/juejin-page.ts','juejin-content':'src/juejin-content.ts','zhihu-bridge':'src/zhihu-bridge.ts'},format:'iife'}
+  {...common,entryPoints:{'juejin-page':'src/juejin-page.ts','juejin-content':'src/juejin-content.ts','zhihu-bridge':'src/zhihu-bridge.ts','xiaohongshu-page':'src/xiaohongshu-page.ts','xiaohongshu-bridge':'src/xiaohongshu-bridge.ts'},format:'iife'}
 ];
 if(watch){const {context}=await import('esbuild');await Promise.all(builds.map(async options=>{const ctx=await context(options);await ctx.watch();}));console.log('Watching…');}else{await Promise.all(builds.map(options=>build(options)));console.log('Built dist/');}

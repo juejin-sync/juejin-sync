@@ -5,12 +5,17 @@ export function articleIdentityKeys(article:SyncTask['article']){
   return[...new Set([article.id,article.sourceDraftId].filter((value):value is string=>!!value))];
 }
 
-export function findMatchingTask(tasks:SyncTask[],article:SyncTask['article'],platform:SyncTask['platform']='csdn',accountId?:string){
-  const identities=new Set(articleIdentityKeys(article));
-  return tasks.find(task=>articleIdentityKeys(task.article).some(identity=>identities.has(identity))&&task.platform===platform&&(platform==='wechat'?task.wechatAccountId===accountId:platform==='cnblogs'?task.cnblogsAccountId===accountId:platform==='zhihu'?task.zhihuAccountId===accountId:true));
+/** 平台绑定的稳定账号标识；CSDN 不区分账号，返回 undefined。 */
+export function taskAccountId(task:SyncTask){
+  return task.platform==='wechat'?task.wechatAccountId:task.platform==='cnblogs'?task.cnblogsAccountId:task.platform==='zhihu'?task.zhihuAccountId:task.platform==='xiaohongshu'?task.xiaohongshuAccountId:undefined;
 }
 
-export function targetArticleId(task:SyncTask){return task.platform==='wechat'?task.wechatAppMsgId:task.platform==='cnblogs'?task.cnblogsPostId:task.platform==='zhihu'?task.zhihuArticleId:task.csdnArticleId;}
+export function findMatchingTask(tasks:SyncTask[],article:SyncTask['article'],platform:SyncTask['platform']='csdn',accountId?:string){
+  const identities=new Set(articleIdentityKeys(article));
+  return tasks.find(task=>articleIdentityKeys(task.article).some(identity=>identities.has(identity))&&task.platform===platform&&(platform==='csdn'||taskAccountId(task)===accountId));
+}
+
+export function targetArticleId(task:SyncTask){return task.platform==='wechat'?task.wechatAppMsgId:task.platform==='cnblogs'?task.cnblogsPostId:task.platform==='zhihu'?task.zhihuArticleId:task.platform==='xiaohongshu'?task.xiaohongshuNoteId:task.csdnArticleId;}
 
 export function extractCsdnArticleId(draftUrl?:string){
   if(!draftUrl)return undefined;

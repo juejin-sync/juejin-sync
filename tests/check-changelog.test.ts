@@ -84,8 +84,8 @@ describe('CHANGELOG 格式校验器 (check-changelog)', () => {
       const result = validateChangelogFile('CHANGELOG.md');
       expect(result.success).toBe(true);
       expect(result.errors).toEqual([]);
-      expect(result.version).toBe('1.5.1');
-      expect(result.totalItems).toBe(3);
+      expect(result.version).toBe('1.6.0');
+      expect(result.totalItems).toBe(4);
     });
   });
 });

@@ -5,7 +5,7 @@ import {Script,runInNewContext} from 'node:vm';
 import {describe,expect,it,vi} from 'vitest';
 
 describe('Content Script 构建产物',()=>{
-  it.each([false,true])('普通脚本能解析且知乎 PING 可响应（release=%s）',async release=>{
+  it.each([false,true])('普通脚本能解析且 Bridge PING 可响应（release=%s）',async release=>{
     execFileSync(process.execPath,['build.mjs',...(release?['--release']:[])],{stdio:'pipe'});
     const manifest=JSON.parse(readFileSync('dist/manifest.json','utf8'));
     for(const entry of manifest.content_scripts){
@@ -21,5 +21,14 @@ describe('Content Script 构建产物',()=>{
       expect(listener({target:'zhihu-bridge',action:'PING'},{},resolve)).toBe(true);
     });
     expect(response).toEqual({ok:true});
+
+    const xhsAddListener=vi.fn();
+    runInNewContext(readFileSync('dist/xiaohongshu-bridge.js','utf8'),{chrome:{runtime:{onMessage:{addListener:xhsAddListener}}}});
+    expect(xhsAddListener).toHaveBeenCalledTimes(1);
+    const xhsListener=xhsAddListener.mock.calls[0][0];
+    const xhsResponse=await new Promise(resolve=>{
+      expect(xhsListener({target:'xiaohongshu-bridge',action:'PING'},{},resolve)).toBe(true);
+    });
+    expect(xhsResponse).toEqual({ok:true});
   },30000);
 });

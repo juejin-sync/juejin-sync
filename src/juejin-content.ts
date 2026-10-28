@@ -1,8 +1,9 @@
 // 掘金页面集成：新文章在发布成功后同步，历史文章通过统一弹窗立即同步。
 import type {Article,PlatformId,SyncTask} from './types';
 import {extractArticleId} from './source/juejin-api';
-import {CNBLOGS_LOGO,CSDN_LOGO,WECHAT_LOGO,ZHIHU_LOGO} from './targets/logos';
+import {CNBLOGS_LOGO,CSDN_LOGO,WECHAT_LOGO,XIAOHONGSHU_LOGO,ZHIHU_LOGO} from './targets/logos';
 import {refreshPlatformSelection,syncReplyState} from './core/sync-dialog';
+import {SUPPORTED_PLATFORMS} from './core/message';
 import {BatchSyncQueue,type BatchTaskItem,type BatchStats} from './core/batch-queue';
 
 type EditorSnapshot={title:string;markdown:string;draftId:string;sourceUrl:string;tags?:string[];cover?:string;summary?:string};
@@ -18,7 +19,8 @@ const PLATFORM_META:Record<PlatformId,{name:string;badge:string;logo:string;chec
   csdn:{name:'CSDN',badge:'博客草稿',logo:CSDN_LOGO,check:'CHECK_CSDN_STATUS',login:'OPEN_CSDN_LOGIN'},
   wechat:{name:'微信公众号',badge:'图文草稿',logo:WECHAT_LOGO,check:'CHECK_WECHAT_STATUS',login:'OPEN_WECHAT_LOGIN'},
   cnblogs:{name:'博客园',badge:'随笔草稿',logo:CNBLOGS_LOGO,check:'CHECK_CNBLOGS_STATUS',login:'OPEN_CNBLOGS_LOGIN'},
-  zhihu:{name:'知乎',badge:'文章草稿',logo:ZHIHU_LOGO,check:'CHECK_ZHIHU_STATUS',login:'OPEN_ZHIHU_LOGIN'}
+  zhihu:{name:'知乎',badge:'文章草稿',logo:ZHIHU_LOGO,check:'CHECK_ZHIHU_STATUS',login:'OPEN_ZHIHU_LOGIN'},
+  xiaohongshu:{name:'小红书',badge:'图文草稿',logo:XIAOHONGSHU_LOGO,check:'CHECK_XIAOHONGSHU_STATUS',login:'OPEN_XIAOHONGSHU_LOGIN'}
 };
 let syncedIds:Promise<Set<string>>|undefined;
 let currentDialogRefresh:(()=>Promise<void>)|null=null;
@@ -200,12 +202,7 @@ async function openSyncDialog(source:SyncSource,trigger:HTMLElement){
   const footerStatus=root.querySelector<HTMLElement>('.jc-footer-status')!;
   const refreshButton=root.querySelector<HTMLButtonElement>('.jc-auth-refresh')!;
 
-  let auths:PlatformAuth[]=[
-    {platform:'csdn',name:'CSDN',ok:true,loggedIn:false,loading:true},
-    {platform:'wechat',name:'微信公众号',ok:true,loggedIn:false,loading:true},
-    {platform:'cnblogs',name:'博客园',ok:true,loggedIn:false,loading:true},
-    {platform:'zhihu',name:'知乎',ok:true,loggedIn:false,loading:true}
-  ];
+  let auths:PlatformAuth[]=SUPPORTED_PLATFORMS.map(platform=>({platform,name:PLATFORM_META[platform].name,ok:true,loggedIn:false,loading:true}));
   const selected=new Set<PlatformId>();
   // 提交期间冻结选择与刷新；默认勾选仅在首次检测完成时应用。
   let submitting=false;
@@ -271,17 +268,12 @@ async function openSyncDialog(source:SyncSource,trigger:HTMLElement){
     refreshing=true;
     updateFooter();
     if(!silent){
-      auths=[
-        {platform:'csdn',name:'CSDN',ok:true,loggedIn:false,loading:true},
-        {platform:'wechat',name:'微信公众号',ok:true,loggedIn:false,loading:true},
-        {platform:'cnblogs',name:'博客园',ok:true,loggedIn:false,loading:true},
-        {platform:'zhihu',name:'知乎',ok:true,loggedIn:false,loading:true}
-      ];
+      auths=SUPPORTED_PLATFORMS.map(platform=>({platform,name:PLATFORM_META[platform].name,ok:true,loggedIn:false,loading:true}));
       render();
     }
     refreshButton.classList.add('is-spinning');
     try{
-      const freshAuths=await Promise.all((['csdn','wechat','cnblogs','zhihu'] as PlatformId[]).map(checkPlatform));
+      const freshAuths=await Promise.all(SUPPORTED_PLATFORMS.map(checkPlatform));
       auths=freshAuths;
       refreshPlatformSelection(selected,auths,!initialized);
       initialized=true;
@@ -409,7 +401,7 @@ function injectPublishIntegration(){
 
   let refreshing=false;
 
-  (['csdn','wechat','cnblogs','zhihu'] as PlatformId[]).forEach(platform=>{
+  SUPPORTED_PLATFORMS.forEach(platform=>{
     const card=field.querySelector<HTMLLabelElement>(`.jc-publish-platform[data-platform="${platform}"]`)!;
     const input=card.querySelector<HTMLInputElement>('.jc-platform-input')!;
 
@@ -471,9 +463,9 @@ function injectPublishIntegration(){
     if(refreshing||!isExtensionAlive())return;
     refreshing=true;
     // 加载态只更新界面，保留上次确认的账号供已选平台创建请求快照。
-    (['csdn','wechat','cnblogs','zhihu'] as PlatformId[]).forEach(platform=>updateCardAuth({platform,name:PLATFORM_META[platform].name,ok:true,loggedIn:false,loading:true}));
+    SUPPORTED_PLATFORMS.forEach(platform=>updateCardAuth({platform,name:PLATFORM_META[platform].name,ok:true,loggedIn:false,loading:true}));
     try{
-      const freshAuths=await Promise.all((['csdn','wechat','cnblogs','zhihu'] as PlatformId[]).map(checkPlatform));
+      const freshAuths=await Promise.all(SUPPORTED_PLATFORMS.map(checkPlatform));
       // 旧面板或已移除字段的检测结果不得覆盖当前选择与账号。
       if(publishPanel!==panel||!field.isConnected||currentPublishRefresh!==refresh)return;
       publishAuths=freshAuths;
@@ -805,7 +797,7 @@ function openBatchSyncWizard(){
   const selectedList=[...selectedArticles.values()];
   const platformsSelected=new Set<PlatformId>();
   const userDeselected=new Set<PlatformId>();
-  let modalAuths:PlatformAuth[]=(['csdn','wechat','cnblogs','zhihu'] as PlatformId[]).map(p=>({
+  let modalAuths:PlatformAuth[]=SUPPORTED_PLATFORMS.map(p=>({
     platform:p,
     name:PLATFORM_META[p].name,
     ok:true,
@@ -877,7 +869,7 @@ function openBatchSyncWizard(){
             <span>目标平台选择</span>
           </div>
           <div class="jc-platform-list jc-batch-platform-list" id="jc-batch-platform-grid">
-            ${(['csdn','wechat','cnblogs','zhihu'] as PlatformId[]).map(p=>`
+            ${SUPPORTED_PLATFORMS.map(p=>`
               <div class="jc-platform-card is-loading" data-platform="${p}">
                 <div class="jc-card-logo"><img src="${PLATFORM_META[p].logo}" alt="" class="jc-logo-img" /></div>
                 <div class="jc-card-content">
@@ -1088,7 +1080,7 @@ function openBatchSyncWizard(){
     }
 
     if(!silent){
-      modalAuths=(['csdn','wechat','cnblogs','zhihu'] as PlatformId[]).map(p=>({
+      modalAuths=SUPPORTED_PLATFORMS.map(p=>({
         platform:p,
         name:PLATFORM_META[p].name,
         ok:true,
@@ -1099,7 +1091,7 @@ function openBatchSyncWizard(){
     }
 
     try{
-      const fresh=await Promise.all((['csdn','wechat','cnblogs','zhihu'] as PlatformId[]).map(checkPlatform));
+      const fresh=await Promise.all(SUPPORTED_PLATFORMS.map(checkPlatform));
       modalAuths=fresh;
       for(const auth of fresh){
         if(!auth.loggedIn){

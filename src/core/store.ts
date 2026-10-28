@@ -1,6 +1,6 @@
-import type {CnblogsDraftMapping,CsdnDraftMapping,ExtensionSettings,PlatformId,SyncTask,WechatDraftMapping,ZhihuDraftMapping} from '../types';
+import type {CnblogsDraftMapping,CsdnDraftMapping,ExtensionSettings,PlatformId,SyncTask,WechatDraftMapping,XiaohongshuDraftMapping,ZhihuDraftMapping} from '../types';
 import {defaultSettings,normalizeSettings} from './settings';
-import {articleIdentityKeys,isActiveTask} from './task';
+import {articleIdentityKeys,isActiveTask,taskAccountId} from './task';
 import {Semaphore} from './async';
 const KEY='syncTasks';
 const SETTINGS_KEY='settings';
@@ -8,9 +8,9 @@ const CSDN_MAPPING_PREFIX='csdnDraftMapping:';
 const WECHAT_MAPPING_PREFIX='wechatDraftMapping:';
 const CNBLOGS_MAPPING_PREFIX='cnblogsDraftMapping:';
 const ZHIHU_MAPPING_PREFIX='zhihuDraftMapping:';
+const XIAOHONGSHU_MAPPING_PREFIX='xiaohongshuDraftMapping:';
 /** 读-改-写互斥锁：序列化对 syncTasks 键的存取，防止 Semaphore(2) 并发下交错覆盖。 */
 const storageMutex=new Semaphore(1);
-const taskAccountId=(task:SyncTask)=>task.platform==='wechat'?task.wechatAccountId:task.platform==='cnblogs'?task.cnblogsAccountId:task.platform==='zhihu'?task.zhihuAccountId:undefined;
 
 /** 持久化前剔除文章正文：任务历史仅保留元信息，防止 storage.local 冲破配额；重试时经掘金双路径回填。 */
 export function toStorageTask(task:SyncTask):SyncTask{
@@ -31,7 +31,7 @@ export function uniqueTasks(tasks:SyncTask[]){
   return[...tasks]
     .sort((a,b)=>Date.parse(b.updatedAt)-Date.parse(a.updatedAt))
     .filter(task=>{
-      const accountId=task.platform==='wechat'?task.wechatAccountId:task.platform==='cnblogs'?task.cnblogsAccountId:task.platform==='zhihu'?task.zhihuAccountId:undefined;
+      const accountId=taskAccountId(task);
       const identity=`${task.platform}:${accountId||'legacy'}:${task.article.id}`;
       if(identities.has(identity))return false;
       identities.add(identity);
@@ -45,6 +45,7 @@ function mappingPrefix(platform:PlatformId,accountId?:string){
   if(platform==='wechat')return WECHAT_MAPPING_PREFIX+(accountId?`${accountId}:`:'');
   if(platform==='cnblogs')return CNBLOGS_MAPPING_PREFIX+(accountId?`${accountId}:`:'');
   if(platform==='zhihu')return ZHIHU_MAPPING_PREFIX+(accountId?`${accountId}:`:'');
+  if(platform==='xiaohongshu')return XIAOHONGSHU_MAPPING_PREFIX+(accountId?`${accountId}:`:'');
   return CSDN_MAPPING_PREFIX;
 }
 function draftMappingValue(articleId:string,targetId:string,draftUrl?:string,platform:PlatformId='csdn',accountId?:string){
@@ -55,7 +56,9 @@ function draftMappingValue(articleId:string,targetId:string,draftUrl?:string,pla
       ?{articleId,cnblogsAccountId:accountId,cnblogsPostId:targetId,draftUrl,updatedAt:new Date().toISOString()}
       :platform==='zhihu'
         ?{articleId,zhihuAccountId:accountId,zhihuArticleId:targetId,draftUrl,updatedAt:new Date().toISOString()}
-        :{articleId,csdnArticleId:targetId,draftUrl,updatedAt:new Date().toISOString()};
+        :platform==='xiaohongshu'
+          ?{articleId,xiaohongshuAccountId:accountId,xiaohongshuNoteId:targetId,draftUrl,updatedAt:new Date().toISOString()}
+          :{articleId,csdnArticleId:targetId,draftUrl,updatedAt:new Date().toISOString()};
   return{key:prefix+articleId,data};
 }
 export async function saveDraftMapping(articleId:string,targetId:string,draftUrl?:string,platform:PlatformId='csdn',accountId?:string){
@@ -64,7 +67,7 @@ export async function saveDraftMapping(articleId:string,targetId:string,draftUrl
 }
 export async function getDraftMapping(articleId:string,platform:PlatformId='csdn',accountId?:string){
   const prefix=mappingPrefix(platform,accountId);
-  return(await chrome.storage.local.get(prefix+articleId))[prefix+articleId] as (CsdnDraftMapping&WechatDraftMapping&CnblogsDraftMapping&ZhihuDraftMapping)|undefined;
+  return(await chrome.storage.local.get(prefix+articleId))[prefix+articleId] as (CsdnDraftMapping&WechatDraftMapping&CnblogsDraftMapping&ZhihuDraftMapping&XiaohongshuDraftMapping)|undefined;
 }
 export async function saveArticleDraftMapping(article:SyncTask['article'],targetId:string,draftUrl?:string,platform:PlatformId='csdn',accountId?:string){
   for(const identity of articleIdentityKeys(article))await saveDraftMapping(identity,targetId,draftUrl,platform,accountId);
@@ -82,13 +85,16 @@ export async function removeArticleDraftMapping(article:SyncTask['article'],plat
     await chrome.storage.local.remove(prefix+identity);
   }
 }
+/** 把任务已获得的远端草稿标识回写为身份映射：删除任务记录时仍能识别已有草稿。 */
+async function persistTaskMapping(task:SyncTask){
+  if(task.platform==='csdn'&&task.csdnArticleId)await saveArticleDraftMapping(task.article,task.csdnArticleId,task.draftUrl,'csdn');
+  else if(task.platform==='wechat'&&task.wechatAppMsgId)await saveArticleDraftMapping(task.article,task.wechatAppMsgId,task.draftUrl,'wechat',task.wechatAccountId);
+  else if(task.platform==='cnblogs'&&task.cnblogsPostId)await saveArticleDraftMapping(task.article,task.cnblogsPostId,task.draftUrl,'cnblogs',task.cnblogsAccountId);
+  else if(task.platform==='zhihu'&&task.zhihuArticleId)await saveArticleDraftMapping(task.article,task.zhihuArticleId,task.draftUrl,'zhihu',task.zhihuAccountId);
+  else if(task.platform==='xiaohongshu'&&task.xiaohongshuNoteId)await saveArticleDraftMapping(task.article,task.xiaohongshuNoteId,task.draftUrl,'xiaohongshu',task.xiaohongshuAccountId);
+}
 export async function preserveTaskMappings(tasks:SyncTask[]){
-  for(const task of tasks){
-    if(task.platform==='csdn'&&task.csdnArticleId)await saveArticleDraftMapping(task.article,task.csdnArticleId,task.draftUrl,'csdn');
-    else if(task.platform==='wechat'&&task.wechatAppMsgId)await saveArticleDraftMapping(task.article,task.wechatAppMsgId,task.draftUrl,'wechat',task.wechatAccountId);
-    else if(task.platform==='cnblogs'&&task.cnblogsPostId)await saveArticleDraftMapping(task.article,task.cnblogsPostId,task.draftUrl,'cnblogs',task.cnblogsAccountId);
-    else if(task.platform==='zhihu'&&task.zhihuArticleId)await saveArticleDraftMapping(task.article,task.zhihuArticleId,task.draftUrl,'zhihu',task.zhihuAccountId);
-  }
+  for(const task of tasks)await persistTaskMapping(task);
 }
 export async function deleteTask(id:string,options?:{removeMapping?:boolean}){await storageMutex.run(async()=>{
   const tasks=await allTasks();
@@ -97,10 +103,7 @@ export async function deleteTask(id:string,options?:{removeMapping?:boolean}){aw
     if(options?.removeMapping){
       await removeArticleDraftMapping(task.article,task.platform,taskAccountId(task));
     }else{
-      if(task.platform==='csdn'&&task.csdnArticleId)await saveArticleDraftMapping(task.article,task.csdnArticleId,task.draftUrl,'csdn');
-      else if(task.platform==='wechat'&&task.wechatAppMsgId)await saveArticleDraftMapping(task.article,task.wechatAppMsgId,task.draftUrl,'wechat',task.wechatAccountId);
-      else if(task.platform==='cnblogs'&&task.cnblogsPostId)await saveArticleDraftMapping(task.article,task.cnblogsPostId,task.draftUrl,'cnblogs',task.cnblogsAccountId);
-      else if(task.platform==='zhihu'&&task.zhihuArticleId)await saveArticleDraftMapping(task.article,task.zhihuArticleId,task.draftUrl,'zhihu',task.zhihuAccountId);
+      await persistTaskMapping(task);
     }
   }
   await saveTasks(tasks.filter(item=>item.id!==id));

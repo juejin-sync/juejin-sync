@@ -1,5 +1,6 @@
 import type {ExtensionSettings,PlatformId,SyncTask,TaskStatus} from './types';
 import {categoryLabels,stageLabels} from './core/diagnostic';
+import {platformLabel} from './core/message';
 import {defaultSettings,formatCategoryMappings,normalizeSettings,parseCategoryMappings} from './core/settings';
 import {isActiveTask,isRetryableTask} from './core/task';
 
@@ -9,11 +10,13 @@ let loginStatus:LoginStatus='checking';
 let wechatLoginStatus:LoginStatus='checking';
 let cnblogsLoginStatus:LoginStatus='checking';
 let zhihuLoginStatus:LoginStatus='checking';
+let xiaohongshuLoginStatus:LoginStatus='checking';
 let selectedPlatform:PlatformId='csdn';
 let csdnAccount='';
 let wechatAccount='';
 let cnblogsAccount='';
 let zhihuAccount='';
+let xiaohongshuAccount='';
 let checkSequence=0;
 let historyFilter:'all'|'saved'|'failed'|'working'='all';
 let currentSettings:ExtensionSettings=defaultSettings;
@@ -21,9 +24,9 @@ let currentTab:'history'|'settings'='history';
 
 function renderPlatformTrigger(){
   const trigger=$('#platform-trigger');
-  const status=selectedPlatform==='csdn'?loginStatus:selectedPlatform==='wechat'?wechatLoginStatus:selectedPlatform==='cnblogs'?cnblogsLoginStatus:zhihuLoginStatus;
-  const account=selectedPlatform==='csdn'?csdnAccount:selectedPlatform==='wechat'?wechatAccount:selectedPlatform==='cnblogs'?cnblogsAccount:zhihuAccount;
-  const name=selectedPlatform==='csdn'?'CSDN':selectedPlatform==='wechat'?'微信':selectedPlatform==='cnblogs'?'博客园':'知乎';
+  const status=selectedPlatform==='csdn'?loginStatus:selectedPlatform==='wechat'?wechatLoginStatus:selectedPlatform==='cnblogs'?cnblogsLoginStatus:selectedPlatform==='zhihu'?zhihuLoginStatus:xiaohongshuLoginStatus;
+  const account=selectedPlatform==='csdn'?csdnAccount:selectedPlatform==='wechat'?wechatAccount:selectedPlatform==='cnblogs'?cnblogsAccount:selectedPlatform==='zhihu'?zhihuAccount:xiaohongshuAccount;
+  const name=platformLabel(selectedPlatform);
   trigger.className=`platform-pill ${status==='logged-in'?'logged':status==='logged-out'?'login-link':status}`;
   $('#platform-trigger-text').textContent=status==='checking'?`${name} 检测中…`:status==='logged-in'?`${name}${account?` · ${account}`:''} ✓`:status==='logged-out'?`${name} 未登录`: `${name} 检测失败`;
 }
@@ -159,6 +162,17 @@ async function checkZhihuLogin(){
   }catch(error){zhihuLoginStatus='error';pill.className='platform-option error'+(selectedPlatform==='zhihu'?' selected':'');text.textContent='知乎检测失败 · 点击重试';toast((error as Error).message);}finally{renderPlatformTrigger();}
 }
 
+async function checkXiaohongshuLogin(){
+  const pill=$('#xiaohongshu-login-state');const text=$('#xiaohongshu-login-text');
+  xiaohongshuLoginStatus='checking';pill.className='platform-option checking'+(selectedPlatform==='xiaohongshu'?' selected':'');text.textContent='小红书检测中…';renderPlatformTrigger();
+  try{
+    const result=await chrome.runtime.sendMessage({type:'CHECK_XIAOHONGSHU_STATUS'});
+    if(result?.loggedIn){xiaohongshuLoginStatus='logged-in';xiaohongshuAccount=result.account||'';pill.className='platform-option logged'+(selectedPlatform==='xiaohongshu'?' selected':'');text.textContent=result.account?`小红书 · ${result.account}`:'小红书已登录';pill.title='小红书已登录，点击刷新状态';}
+    else if(result?.ok){xiaohongshuLoginStatus='logged-out';xiaohongshuAccount='';pill.className='platform-option login-link'+(selectedPlatform==='xiaohongshu'?' selected':'');text.textContent='小红书未登录 · 点击登录';pill.title='点击登录小红书创作服务平台';}
+    else throw new Error(result?.message||'小红书登录检测失败');
+  }catch(error){xiaohongshuLoginStatus='error';pill.className='platform-option error'+(selectedPlatform==='xiaohongshu'?' selected':'');text.textContent='小红书检测失败 · 点击重试';toast((error as Error).message);}finally{renderPlatformTrigger();}
+}
+
 function escapeHtml(value:string){
   return value.replace(/[&<>"']/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]!));
 }
@@ -203,7 +217,7 @@ function taskCard(task:SyncTask){
   if(task.platform==='csdn'&&!['queued','checking-login','transforming','writing'].includes(task.status))actions.push(`<button class="history-action btn-action-dryrun" data-dryrun="${escapeHtml(task.id)}" title="同步预演：查看分类命中、图片转存与内容风险，不写入 CSDN">预演</button>`);
   if(task.status==='needs-confirmation')actions.push(`<button class="history-action confirm btn-action-confirm" data-confirm="${escapeHtml(task.id)}">确认更新</button>`);
   if(['failed','needs-user'].includes(task.status))actions.push(`<button class="history-action retry btn-action-retry" data-retry="${escapeHtml(task.id)}">重试</button>`);
-  if(['failed','needs-user'].includes(task.status)&&(task.wechatAppMsgId||task.csdnArticleId||task.cnblogsPostId||task.zhihuArticleId))actions.push(`<button class="history-action retry btn-action-retry" data-retry-new="${escapeHtml(task.id)}" title="忽略旧草稿关联，作为全新草稿重新保存">另存新草稿</button>`);
+  if(['failed','needs-user'].includes(task.status)&&(task.wechatAppMsgId||task.csdnArticleId||task.cnblogsPostId||task.zhihuArticleId||task.xiaohongshuNoteId))actions.push(`<button class="history-action retry btn-action-retry" data-retry-new="${escapeHtml(task.id)}" title="忽略旧草稿关联，作为全新草稿重新保存">另存新草稿</button>`);
   if(!['queued','checking-login','transforming','writing'].includes(task.status))actions.push(`<button class="history-action delete btn-action-delete" data-delete="${escapeHtml(task.id)}" title="删除本地记录" aria-label="删除本地记录"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg></button>`);
   const action=`<span class="task-actions">${actions.join('')}</span>`;
   const error=task.error?`<p class="platform-error" title="${escapeHtml(task.error)}">${escapeHtml(task.error)}</p>`:'';
@@ -219,7 +233,7 @@ function taskCard(task:SyncTask){
     </div>
     <div class="task-progress ${task.progress.total?'':'indeterminate'}"><span style="width:${task.progress.total?progressPercent:35}%"></span></div>
   </div>`:'';
-  const platformName=task.platform==='wechat'?'微信公众号':task.platform==='cnblogs'?'博客园':task.platform==='zhihu'?'知乎':'CSDN';
+  const platformName=platformLabel(task.platform);
   const bottomStats=stats?`<span>${platformName}</span><i>·</i>${stats}`:`<span>${platformName}草稿同步</span>`;
   return`<div class="history-card ${kind}">
     <div class="task-main-row">
@@ -427,7 +441,9 @@ async function checkHealthBanner(){
     const result=await chrome.runtime.sendMessage({type:'GET_HEALTH_STATUS'});
     if(!result?.alert)return;
     const status=result.status;
-    const broken=status?.cnblogs==='broken'?'博客园':status?.wechat==='broken'?'微信公众号':status?.csdn==='broken'?'CSDN':'掘金';
+    const healthPlatforms:PlatformId[]=['csdn','wechat','cnblogs','zhihu','xiaohongshu'];
+    const brokenPlatform=healthPlatforms.find(platform=>status?.[platform]==='broken');
+    const broken=brokenPlatform?platformLabel(brokenPlatform):'掘金';
     $('#health-title').textContent=`${broken}接口状态异常`;
     $('#health-message').textContent=status?.message||'平台接口近期变动，同步可能失败';
     banner.hidden=false;
@@ -520,6 +536,12 @@ $('#zhihu-login-state').addEventListener('click',()=>{
   else if(zhihuLoginStatus==='error')void chrome.runtime.sendMessage({type:'OPEN_ZHIHU_LOGIN'});
   else void checkZhihuLogin();
 });
+$('#xiaohongshu-login-state').addEventListener('click',()=>{
+  selectPlatform('xiaohongshu');
+  if(xiaohongshuLoginStatus==='logged-out')void chrome.runtime.sendMessage({type:'OPEN_XIAOHONGSHU_LOGIN'});
+  else if(xiaohongshuLoginStatus==='error')void chrome.runtime.sendMessage({type:'OPEN_XIAOHONGSHU_LOGIN'});
+  else void checkXiaohongshuLogin();
+});
 document.addEventListener('click',event=>{
   if(!(event.target as Element).closest('.platform-switcher'))setPlatformMenu(false);
 });
@@ -581,4 +603,5 @@ void checkLogin();
 void checkWechatLogin();
 void checkCnblogsLogin();
 void checkZhihuLogin();
+void checkXiaohongshuLogin();
 void checkHealthBanner();

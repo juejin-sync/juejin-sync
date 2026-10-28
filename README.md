@@ -1,7 +1,7 @@
 <div align="center">
   <img src="assets/logo-128.png" width="96" height="96" alt="掘金同步助手 Logo">
   <h1>掘金同步助手 · Juejin Sync</h1>
-  <p><b>将掘金文章一键同步到 CSDN、微信公众号、博客园与知乎专栏草稿箱。</b></p>
+  <p><b>将掘金文章一键同步到 CSDN、微信公众号、博客园、知乎专栏与小红书草稿箱。</b></p>
   <p>
     <a href="https://github.com/juejin-sync/juejin-sync/releases/latest">📥 下载安装包</a> ·
     <a href="CHANGELOG.md">📜 更新日志</a> ·
@@ -11,7 +11,7 @@
 
 [![Release](https://img.shields.io/github/v/release/juejin-sync/juejin-sync)](https://github.com/juejin-sync/juejin-sync/releases)
 [![CI](https://github.com/juejin-sync/juejin-sync/actions/workflows/ci.yml/badge.svg)](https://github.com/juejin-sync/juejin-sync/actions/workflows/ci.yml)
-[![Tests](https://img.shields.io/badge/tests-281%20passed-brightgreen)](tests)
+[![Tests](https://img.shields.io/badge/tests-354%20passed-brightgreen)](tests)
 [![License](https://img.shields.io/github/license/juejin-sync/juejin-sync)](LICENSE)
 
 掘金同步助手是一款 Chrome Manifest V3 浏览器扩展。它读取你主动选择的掘金文章或编辑器草稿，在浏览器本地处理排版与图片后同步到目标平台的草稿箱。**纯本地运行，不依赖任何第三方中转服务器，零凭据托管。**
@@ -28,6 +28,7 @@
 | <img src="assets/platform-wechat.png" width="18" height="18" valign="middle" alt="微信公众号"> **微信公众号** | 草稿箱（原生图文排版、代码高亮与封面裁剪） | ✅ 已支持 |
 | <img src="assets/platform-cnblogs.png" width="18" height="18" valign="middle" alt="博客园"> **博客园** | 随笔草稿箱（Markdown 适配与图片转存） | ✅ 已支持 |
 | <img src="assets/platform-zhihu.png" width="18" height="18" valign="middle" alt="知乎专栏"> **知乎专栏** | 专栏草稿箱（富文本排版与公式高保真） | ✅ 已支持 |
+| <img src="assets/platform-xiaohongshu.png" width="18" height="18" valign="middle" alt="小红书"> **小红书** | 图文笔记草稿（纯文本排版、话题标签与图片转存） | ✅ 已支持 |
 
 ---
 
@@ -66,7 +67,7 @@ git clone https://github.com/juejin-sync/juejin-sync.git
 cd juejin-sync
 npm ci
 npm run check    # TypeScript 类型检查
-npm test         # 自动化测试（281 项全覆盖）
+npm test         # 自动化测试（354 项全覆盖）
 npm run build    # 本地开发构建
 ```
 

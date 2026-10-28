@@ -742,6 +742,12 @@ main {
   border: 1px solid rgba(0, 102, 255, 0.28);
 }
 
+.platform-badge.xiaohongshu {
+  background: rgba(255, 36, 66, 0.1);
+  color: #d61b38;
+  border: 1px solid rgba(255, 36, 66, 0.28);
+}
+
 @media (prefers-color-scheme: dark) {
   .platform-badge.csdn {
     background: rgba(252, 85, 49, 0.18);
@@ -762,6 +768,11 @@ main {
     background: rgba(0, 102, 255, 0.2);
     color: #4d94ff;
     border-color: rgba(77, 148, 255, 0.38);
+  }
+  .platform-badge.xiaohongshu {
+    background: rgba(255, 36, 66, 0.2);
+    color: #ff6b81;
+    border-color: rgba(255, 107, 129, 0.38);
   }
 }
 
