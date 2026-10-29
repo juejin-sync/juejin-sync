@@ -143,9 +143,32 @@ describe('精简图文配方',()=>{
     expect(()=>validateXiaohongshuImageContent(content)).toThrow('20');
   });
   it('图片去重使用资源身份，data URL 不进入配方存储',()=>{
-    const src='data:image/png;base64,AA==';const content=buildXiaohongshuImageContent({...article,cover:src});
+    const src='data:image/png;base64,AA==';
+    const content=buildXiaohongshuImageContent({...article,markdown:`## 步骤\n\n1. 操作。\n\n![图](${src})`},{syncOriginalImages:true});
     expect(content.selectedImageKeys).toEqual([imageKey(src)]);expect(JSON.stringify(content)).not.toContain('base64');
     expect(imageKey('https://example.com/a.png?token=old')).toBe(imageKey('https://example.com/a.png?token=new'));
+  });
+  it('原图增强默认关闭，显式开启后最多2张且顺序紧跟对应观点图卡',()=>{
+    const md=`# 介绍\n\n## 第一章\n\n第一段文字。\n\n![图1](https://example.com/1.png)\n\n## 第二章\n\n第二段文字。\n\n![图2](https://example.com/2.png)\n\n## 第三章\n\n第三段文字。\n\n![图3](https://example.com/3.png)`;
+    const defContent=buildXiaohongshuImageContent({...article,markdown:md});
+    expect(defContent.originalImagesCount).toBe(0);
+    expect(defContent.pages.every(p=>p.type==='card')).toBe(true);
+    expect(defContent.selectedImageKeys).toEqual([]);
+
+    const enhanced=buildXiaohongshuImageContent({...article,markdown:md},{syncOriginalImages:true});
+    expect(enhanced.originalImagesCount).toBe(2);
+    expect(enhanced.pages.filter(p=>p.type==='image')).toHaveLength(2);
+    expect(enhanced.selectedImageKeys).toHaveLength(2);
+    // 原图应紧跟在观点图卡之后
+    const firstImgIdx=enhanced.pages.findIndex(p=>p.type==='image');
+    expect(enhanced.pages[firstImgIdx-1].type).toBe('card');
+    expect(enhanced.pages[firstImgIdx-1].kind).toBe('point');
+  });
+  it('精简图文导读采用稳定模板并与实际观点数量对应，不以承接词起头',()=>{
+    const content=buildXiaohongshuImageContent(article);
+    expect(content.body).toMatch(/围绕《技术实践指南》，本次图卡整理了 \d+ 个核心要点/);
+    expect(content.body).toContain('2. 步骤');
+    expect(content.body).not.toMatch(/^[，,。、\s]/);
   });
   it('编辑后字数和总图片预算重新校验，图卡内容不能静默截掉',()=>{
     const content=buildXiaohongshuImageContent(article);

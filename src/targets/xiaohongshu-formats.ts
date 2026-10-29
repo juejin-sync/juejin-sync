@@ -1,7 +1,7 @@
 // 小红书双格式内容契约：长文保留完整结构，精简图文使用可编辑的抽取内容与本地图卡。
 import {Marked} from 'marked';
 import {md5} from 'js-md5';
-import type {Article,XiaohongshuCard,XiaohongshuImageContent} from '../types';
+import type {Article,XiaohongshuCard,XiaohongshuImageContent,XiaohongshuPage} from '../types';
 import {SyncError} from '../core/diagnostic';
 import {resolveMermaidDiagram} from '../core/mermaid-render';
 import {markdownToXiaohongshuText,formatXiaohongshuTopics,stripInlineMarkdown} from './xiaohongshu-content';
@@ -104,45 +104,124 @@ export function compileXiaohongshuArticle(article:Article,options:{mermaidImages
 }
 
 /** 按完整文章的章节抽取句子；结果供用户在平台草稿箱核对，不作为自动理解或 AI 改写。 */
-export function buildXiaohongshuImageContent(article:Article,options:{syncCover?:boolean;appendSourceLink?:boolean;mermaidImages?:Map<string,string>}={}):XiaohongshuImageContent{
+export function buildXiaohongshuImageContent(article:Article,options:{syncCover?:boolean;appendSourceLink?:boolean;syncOriginalImages?:boolean;mermaidImages?:Map<string,string>}={}):XiaohongshuImageContent{
   const tokens=new Marked({gfm:true}).lexer(normalizeMarkdown(article.markdown));
-  const sections:Array<{heading:string;text:string[]}>=[{heading:'核心内容',text:[]}];
+  type RawSection={heading:string;text:string[];images:string[];isSummary:boolean};
+  const sections:RawSection[]=[{heading:'核心内容',text:[],images:[],isSummary:false}];
   for(const token of tokens as any[]){
-    if(token.type==='heading'){sections.push({heading:stripInlineMarkdown(token.text),text:[]});continue;}
+    if(token.type==='heading'){
+      const heading=stripInlineMarkdown(token.text);
+      const isSummary=/总结|结论|限制|注意|思考|展望|写在最后|结语|边界|规则/.test(heading);
+      sections.push({heading,text:[],images:[],isSummary});
+      continue;
+    }
     if(['paragraph','list','blockquote'].includes(token.type)){
-      const text=markdownToXiaohongshuText(token.raw).text;
-      if(text&&!/完整代码|代码如下|如下所示|见下文|下图|如图/.test(text))sections.at(-1)!.text.push(text);
+      const converted=markdownToXiaohongshuText(token.raw,options.mermaidImages);
+      if(converted.text&&!/完整代码|代码如下|如下所示|见下文|下图|如图|如图所示/.test(converted.text)){
+        sections.at(-1)!.text.push(converted.text);
+      }
+      for(const img of converted.images){
+        if(img&&img!==article.cover&&!sections.at(-1)!.images.includes(img)){
+          sections.at(-1)!.images.push(img);
+        }
+      }
     }
   }
   const nonempty=sections.filter(s=>s.text.length);
-  // 均匀选取章节，确保长文尾部的限制、结论也有机会出现。
-  const chosen=nonempty.length<=6?nonempty:Array.from({length:6},(_,i)=>nonempty[Math.round(i*(nonempty.length-1)/5)]);
+  const summarySection=nonempty.find(s=>s.isSummary);
+  const bodySections=nonempty.filter(s=>s!==summarySection);
+
   const takeSentence=(s:string,max:number)=>{
     const sentences=s.split('\n').flatMap(line=>line.match(/[^。！？]+[。！？]?/g)||[]).map(line=>line.trim());
-    // 不选“有三件事：”“代码如下：”等引导句；精简后不能承诺已经省去的后续内容。
     return sentences.filter(t=>t&&!/[：:]$/.test(t)&&[...t].length<=max).slice(0,2).join('\n');
   };
-  const cards:XiaohongshuCard[]=chosen.map(s=>({heading:s.heading,body:takeSentence(s.text.join('\n'),300)})).filter(card=>card.body);
-  cards.unshift({heading:'文章主题',body:[article.title,stripInlineMarkdown(article.summary||'')].filter(Boolean).join('\n\n')});
+
+  const targetCount=Math.min(5,Math.max(3,bodySections.length));
+  const chosen=bodySections.length<=targetCount
+    ?bodySections
+    :Array.from({length:targetCount},(_,i)=>bodySections[Math.round(i*(bodySections.length-1)/(targetCount-1))]);
+
+  const coverBody=[article.title,stripInlineMarkdown(article.summary||'')].filter(Boolean).join('\n\n');
+  const pages:XiaohongshuPage[]=[
+    {type:'card',kind:'cover',heading:'文章主题',body:coverBody}
+  ];
+
+  let originalImagesCount=0;
+  const maxOriginalImages=options.syncOriginalImages?2:0;
+  const usedImages=new Set<string>();
+
+  chosen.forEach((sec,idx)=>{
+    const body=takeSentence(sec.text.join('\n'),300);
+    if(!body)return;
+    pages.push({type:'card',kind:'point',heading:sec.heading,body,sectionIndex:idx});
+    if(originalImagesCount<maxOriginalImages&&sec.images.length>0){
+      const candidate=sec.images.find(img=>!usedImages.has(img));
+      if(candidate){
+        usedImages.add(candidate);
+        originalImagesCount++;
+        pages.push({type:'image',src:candidate.startsWith('data:')?'':candidate,imageKey:imageKey(candidate),sectionIndex:idx,caption:`${sec.heading} 配图`});
+      }
+    }
+  });
+
+  if(summarySection){
+    const summaryBody=takeSentence(summarySection.text.join('\n'),300);
+    if(summaryBody){
+      pages.push({type:'card',kind:'summary',heading:summarySection.heading,body:summaryBody});
+    }
+  }
+
+  const cardPages=pages.filter(p=>p.type==='card');
+  if(cardPages.length>8){
+    const cover=pages.find(p=>p.type==='card'&&p.kind==='cover')!;
+    const summary=pages.find(p=>p.type==='card'&&p.kind==='summary');
+    const points=pages.filter(p=>p.type==='card'&&p.kind==='point').slice(0,summary?6:7);
+    pages.length=0;
+    pages.push(cover,...points,...(summary?[summary]:[]));
+  }
+
+  const pointCards=pages.filter(p=>p.type==='card'&&p.kind==='point') as Array<Extract<XiaohongshuPage,{type:'card'}>>;
   const segments:string[]=[];
-  if(article.summary?.trim())segments.push(takeSentence(stripInlineMarkdown(article.summary),180));
-  for(const card of cards.slice(1)){const text=takeSentence(card.body,110);if(text)segments.push(`${card.heading}\n${text}`);}
-  let body=segments.filter(Boolean).join('\n\n');
+  if(article.summary?.trim()){
+    const summaryText=takeSentence(stripInlineMarkdown(article.summary),150);
+    if(summaryText&&!/^[，,。、\s]/.test(summaryText))segments.push(summaryText);
+  }
+  segments.push(`围绕《${article.title}》，本次图卡整理了 ${pointCards.length} 个核心要点，快速浏览关键步骤与实践总结：`);
+  for(const [idx,p] of pointCards.entries()){
+    segments.push(`${idx+1}. ${p.heading}`);
+  }
+  segments.push('完整技术细节与代码实现请查看掘金原文。');
+  let bodyText=segments.join('\n\n');
   const tail=[formatXiaohongshuTopics(article.tags.slice(0,5)),options.appendSourceLink!==false?'本文首发于掘金':''].filter(Boolean).join('\n\n');
-  // 整句选择；不生成省略号或缺失后文的半句。
-  if(xhsImageLength(body)>850){body=segments.filter(Boolean).filter(s=>xhsImageLength(s)<300).slice(0,5).join('\n\n');}
-  while(xhsImageLength(`${body}\n\n${tail}`)>1000&&body.includes('\n\n'))body=body.slice(0,body.lastIndexOf('\n\n'));
+  if(xhsImageLength(bodyText)>850){
+    bodyText=segments.slice(0,4).join('\n\n');
+  }
+  while(xhsImageLength(`${bodyText}\n\n${tail}`)>1000&&bodyText.includes('\n\n'))bodyText=bodyText.slice(0,bodyText.lastIndexOf('\n\n'));
+
   const rawTitle=stripInlineMarkdown(article.title);
-  const title=rawTitle.length<=20?rawTitle:(rawTitle.split(/[：:｜|，,。！？]/).find(s=>s.trim().length>0&&s.trim().length<=20)?.trim()||rawTitle);
-  const sources=xhsImageCandidates(article,options.mermaidImages);
-  return{title,body:[body,tail].filter(Boolean).join('\n\n'),cards,selectedImageKeys:sources.filter(s=>options.syncCover!==false||s!==article.cover).map(imageKey)};
+  const title=rawTitle.length<=20?rawTitle:(rawTitle.split(/[：:｜|，,。！？\s-]/).find(s=>s.trim().length>0&&s.trim().length<=20)?.trim()||rawTitle);
+
+  const cards:XiaohongshuCard[]=pages.filter((p):p is Extract<XiaohongshuPage,{type:'card'}>=>p.type==='card').map(p=>({heading:p.heading,body:p.body,kind:p.kind,sectionIndex:p.sectionIndex}));
+  const selectedImageKeys=pages.filter((p):p is Extract<XiaohongshuPage,{type:'image'}>=>p.type==='image').map(p=>p.imageKey);
+
+  return{
+    version:2,
+    title,
+    body:[bodyText,tail].filter(Boolean).join('\n\n'),
+    pages,
+    originalImagesCount,
+    cards,
+    selectedImageKeys
+  };
 }
 
 export function validateXiaohongshuImageContent(content:XiaohongshuImageContent){
   if(!content||typeof content.title!=='string'||!content.title.trim()||content.title.length>20)throw new SyncError('精简图文标题需为 1～20 个字符，请调整原文标题或在偏好设置中选择其他格式','content','validation');
   if(typeof content.body!=='string'||!content.body.trim()||xhsImageLength(content.body)>1000)throw new SyncError('精简图文正文需为 1～1000 字，请调整原文标题或在偏好设置中选择其他格式','content','validation');
-  if(!Array.isArray(content.cards)||!Array.isArray(content.selectedImageKeys)||!content.cards.length&&!content.selectedImageKeys.length)throw new SyncError('精简图文至少需要一张图卡或配图','content','validation');
-  if(content.cards.length+content.selectedImageKeys.length>18)throw new SyncError('精简图文的图卡和配图合计不能超过18张，请减少原文配图或在偏好设置中选择仅长文','content','validation');
-  for(const card of content.cards){if(typeof card.heading!=='string'||typeof card.body!=='string'||!card.body.trim()||card.heading.length>64||[...card.body].length>600)throw new SyncError('单张图卡标题不能超过64字符、正文不能超过600字，请编辑或拆分','content','validation');}
-  if(content.selectedImageKeys.some(key=>typeof key!=='string'||key.length>4096))throw new SyncError('精简图文配图选择无效','content','validation');
+  const cards=Array.isArray(content.cards)?content.cards:(Array.isArray(content.pages)?content.pages.filter(p=>p.type==='card'):[]);
+  const images=Array.isArray(content.selectedImageKeys)?content.selectedImageKeys:(Array.isArray(content.pages)?content.pages.filter(p=>p.type==='image'):[]);
+  if(!cards.length&&!images.length)throw new SyncError('精简图文至少需要一张图卡或配图','content','validation');
+  if(cards.length+images.length>18)throw new SyncError('精简图文的图卡和配图合计不能超过18张，请减少原文配图或在偏好设置中选择仅长文','content','validation');
+  for(const card of cards as XiaohongshuCard[]){if(typeof card.heading!=='string'||typeof card.body!=='string'||!card.body.trim()||card.heading.length>64||[...card.body].length>600)throw new SyncError('单张图卡标题不能超过64字符、正文不能超过600字，请编辑或拆分','content','validation');}
+  if(content.selectedImageKeys?.some(key=>typeof key!=='string'||key.length>4096))throw new SyncError('精简图文配图选择无效','content','validation');
 }

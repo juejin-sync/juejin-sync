@@ -402,6 +402,7 @@ async function loadTasks(){
 
 function renderSettings(settings:ExtensionSettings){
   $<HTMLSelectElement>('#xiaohongshu-mode').value=settings.xiaohongshuMode;
+  $<HTMLInputElement>('#xiaohongshu-sync-original-images').checked=settings.xiaohongshuSyncOriginalImages;
   $<HTMLInputElement>('#sync-cover').checked=settings.syncCover;
   $<HTMLInputElement>('#auto-summary').checked=settings.autoSummary;
   $<HTMLInputElement>('#append-source-link').checked=settings.appendSourceLink;
@@ -415,6 +416,7 @@ function renderSettings(settings:ExtensionSettings){
 async function saveSettingsFromForm(){
   currentSettings=normalizeSettings({
     xiaohongshuMode:$<HTMLSelectElement>('#xiaohongshu-mode').value,
+    xiaohongshuSyncOriginalImages:$<HTMLInputElement>('#xiaohongshu-sync-original-images').checked,
     syncCover:$<HTMLInputElement>('#sync-cover').checked,
     autoSummary:$<HTMLInputElement>('#auto-summary').checked,
     appendSourceLink:$<HTMLInputElement>('#append-source-link').checked,
@@ -586,7 +588,7 @@ $<HTMLButtonElement>('#history-clear').addEventListener('click',async()=>{
   await loadTasks();
 });
 
-['#xiaohongshu-mode','#sync-cover','#auto-summary','#append-source-link','#confirm-update','#image-failure','#wechat-code-theme'].forEach(selector=>$(selector).addEventListener('change',()=>void saveSettingsFromForm()));
+['#xiaohongshu-mode','#xiaohongshu-sync-original-images','#sync-cover','#auto-summary','#append-source-link','#confirm-update','#image-failure','#wechat-code-theme'].forEach(selector=>$(selector).addEventListener('change',()=>void saveSettingsFromForm()));
 ['#default-category','#category-mappings'].forEach(selector=>$(selector).addEventListener('change',()=>void saveSettingsFromForm()));
 
 $('#health-detail').addEventListener('click',()=>void chrome.tabs.create({url:STATUS_PAGE_URL,active:true}));

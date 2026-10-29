@@ -454,8 +454,13 @@ chrome.runtime.onMessage.addListener((message,sender,reply)=>{
       if(format!=='article'&&format!=='image')throw new Error('无效的小红书格式');
       const article=message.article?await ensureArticleContent(message.article as Article):await fetchJuejinDraftByArticleId(String(message.articleId),String(message.uuid||''),String(message.title||''));
       const settings=await getSettings();
-      const mermaidImages=format==='image'?await renderAllMermaidBlocks(article.markdown):undefined;
-      const imageContent=format==='image'?buildXiaohongshuImageContent(article,{mermaidImages,syncCover:settings.syncCover,appendSourceLink:settings.appendSourceLink}):undefined;
+      const mermaidImages=format==='image'&&settings.xiaohongshuSyncOriginalImages?await renderAllMermaidBlocks(article.markdown):undefined;
+      const imageContent=format==='image'?buildXiaohongshuImageContent(article,{
+        mermaidImages,
+        syncCover:settings.syncCover,
+        appendSourceLink:settings.appendSourceLink,
+        syncOriginalImages:settings.xiaohongshuSyncOriginalImages
+      }):undefined;
       // 内容校验由已落盘的具体格式任务执行，失败也保留独立的任务记录。
       reply({ok:true,article,imageContent});
     }else if(message.type==='SYNC_NEW_ARTICLE'){
