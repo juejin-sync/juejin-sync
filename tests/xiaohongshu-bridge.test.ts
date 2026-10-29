@@ -26,7 +26,8 @@ function setup(){
     files:any[]=[];
     items={add:(file:File)=>this.files.push(file)};
   }
-  runInNewContext(code,{document,Event,CustomEvent,File,Uint8Array,atob,DataTransfer:Transfer,crypto:{randomUUID:()=> 'save-op'},Date,setTimeout,clearTimeout,
+  class DragEvent extends Event{}
+  runInNewContext(code,{document,Event,CustomEvent,File,DragEvent,Uint8Array,atob,DataTransfer:Transfer,crypto:{randomUUID:()=> 'save-op'},Date,setTimeout,clearTimeout,
     getComputedStyle:()=>({display:'block',visibility:'visible',opacity:'1'}),
     chrome:{runtime:{onMessage:{addListener:(value:any)=>{listener=value;}}}}});
   const send=(action:string,payload?:unknown)=>new Promise<any>(resolve=>listener({target:'xiaohongshu-bridge',action,payload},{},resolve));
@@ -160,5 +161,23 @@ describe('小红书隔离世界驱动',()=>{
     env.selectors.set('.img-list input[type="file"][multiple]',[new EventTarget()]);
     env.selectors.set('.img-preview-area .img-container',[{querySelector:()=>({})}]);
     await expect(env.send('UPLOAD_IMAGE',{base64:'AA==',mime:'image/png',name:'logo.png',imageCount:1})).resolves.toMatchObject({ok:false,message:expect.stringContaining('上传失败')});
+  });
+
+  it('IMPORT_MARKDOWN_FILE: 注入内存 Markdown 文件并派发 change 事件',async()=>{
+    const env=setup();
+    const titleInput=Object.assign(new EventTarget(),element(),{value:'',maxLength:64,placeholder:'输入标题'});
+    const editor=Object.assign(new EventTarget(),element());
+    const fileInput=Object.assign(new EventTarget(),{files:[] as any[]});
+    env.selectors.set('.rich-editor-content .tiptap.ProseMirror[contenteditable="true"]',[editor]);
+    env.selectors.set('textarea[placeholder="输入标题"]',[titleInput]);
+    env.selectors.set('input[type="file"][accept*=".md"], input[type="file"][accept*=".docx"], input[type="file"][accept*=".txt"]',[fileInput]);
+
+    const pending=env.send('IMPORT_MARKDOWN_FILE',{title:'长文测试标题',markdown:'# 正文内容'});
+    await vi.advanceTimersByTimeAsync(1500);
+    const result=await pending;
+    expect(result).toEqual({ok:true});
+    expect(titleInput.value).toBe('长文测试标题');
+    expect(fileInput.files).toHaveLength(1);
+    expect(fileInput.files[0].name).toBe('长文测试标题.md');
   });
 });

@@ -23,6 +23,37 @@ export function xhsImageCandidates(article:Article,mermaidImages?:Map<string,str
 }
 
 export type XiaohongshuArticleContent={title:string;html:string;text:string;images:string[];warnings:string[]};
+export type XiaohongshuMarkdownDoc={title:string;markdown:string;images:string[];warnings:string[]};
+
+/** 生成内存 Markdown 文件，保留标准结构并处理图表；供原生文档导入使用。 */
+export function compileXiaohongshuMarkdownDocument(article:Article,options:{mermaidImages?:Map<string,string>;appendSourceLink?:boolean}={}):XiaohongshuMarkdownDoc{
+  const title=article.title.trim();
+  if(!title||title.length>XHS_ARTICLE_TITLE_MAX)throw new SyncError('小红书长文标题需为 1～64 个字符，请调整原文标题或在偏好设置中选择其他格式','content','validation');
+  const warnings:string[]=[];
+  let markdown=normalizeMarkdown(article.markdown);
+
+  if(options.mermaidImages&&options.mermaidImages.size>0){
+    markdown=markdown.replace(/```mermaid\b[\s\S]*?```/g,match=>{
+      const code=match.replace(/^```mermaid\s*\n?|\n?```$/g,'').trim();
+      const imageSrc=options.mermaidImages?.get(code);
+      if(imageSrc)return `![图表](${imageSrc})`;
+      return match;
+    });
+  }
+
+  const images:string[]=[];
+  const imageMatches=markdown.matchAll(/!\[[^\]]*\]\(([^)]+)\)/g);
+  for(const m of imageMatches){
+    const src=m[1].trim();
+    if(src&&!images.includes(src))images.push(src);
+  }
+
+  if(options.appendSourceLink!==false&&article.sourceUrl){
+    markdown+='\n\n---\n\n> 本文首发于掘金';
+  }
+
+  return{title,markdown,images,warnings};
+}
 /** 长文只生成平台已验证支持的结构；代码逐行保留，表格显式转为字段列表，不静默压平。 */
 export function compileXiaohongshuArticle(article:Article,options:{mermaidImages?:Map<string,string>;appendSourceLink?:boolean;imageWeight?:number}={}):XiaohongshuArticleContent{
   const title=article.title.trim();

@@ -1,6 +1,6 @@
 // 双格式内容、图卡配方和任务身份回归，确保完整长文与精简图文不共用截断规则。
 import {describe,expect,it} from 'vitest';
-import {buildXiaohongshuImageContent,compileXiaohongshuArticle,imageKey,validateXiaohongshuImageContent,xhsWordCount} from '../src/targets/xiaohongshu-formats';
+import {buildXiaohongshuImageContent,compileXiaohongshuArticle,compileXiaohongshuMarkdownDocument,imageKey,validateXiaohongshuImageContent,xhsWordCount} from '../src/targets/xiaohongshu-formats';
 import {findMatchingTask} from '../src/core/task';
 import {uniqueTasks,toStorageTask,migrateStoredTasks} from '../src/core/store';
 import type {Article,SyncTask} from '../src/types';
@@ -68,6 +68,24 @@ describe('小红书长文编译',()=>{
   it('过滤掘金主题元数据并保留行内代码中的 Cron、下划线和泛型符号',()=>{
     const note=compileXiaohongshuArticle({...article,markdown:'---\ntheme: cyanosis\n---\n\n## 配置 `a__b`\n\nCron：`0 0 9 * * *`，类型：`List<T>`。\n\n| 名称 | 值 |\n| --- | --- |\n| Cron | `0 0 9 * * *` |'});
     expect(note.text).not.toContain('cyanosis');expect(note.text).toContain('配置 a__b');expect(note.text).toContain('0 0 9 * * *');expect(note.text).toContain('List<T>');expect(note.text).toContain('值：0 0 9 * * *');
+  });
+});
+
+describe('长文 Markdown 文件生成',()=>{
+  it('清理掘金专属主题元数据并正确替换 Mermaid 图表引用',()=>{
+    const doc=compileXiaohongshuMarkdownDocument({
+      ...article,
+      markdown:'---\ntheme: cyanosis\n---\n\n# 标题\n\n正文。\n\n```mermaid\nflowchart TD\nA-->B\n```\n\n![配图](https://example.com/p.png)'
+    },{mermaidImages:new Map([['flowchart TD\nA-->B','data:image/png;base64,CHART']])});
+    expect(doc.markdown).not.toContain('cyanosis');
+    expect(doc.markdown).toContain('![图表](data:image/png;base64,CHART)');
+    expect(doc.images).toContain('https://example.com/p.png');
+    expect(doc.images).toContain('data:image/png;base64,CHART');
+    expect(doc.markdown).toContain('本文首发于掘金');
+  });
+  it('超长长文标题在 1~64 范围之外时抛出友好校验错误',()=>{
+    expect(()=>compileXiaohongshuMarkdownDocument({...article,title:''})).toThrow('64');
+    expect(()=>compileXiaohongshuMarkdownDocument({...article,title:'长'.repeat(65)})).toThrow('64');
   });
 });
 
