@@ -72,10 +72,15 @@ async function prepareImageNote(){
 }
 
 function setInputValue(input:HTMLInputElement|HTMLTextAreaElement,value:string){
-  const prototype=input instanceof HTMLTextAreaElement?HTMLTextAreaElement.prototype:HTMLInputElement.prototype;
+  const prototype=typeof HTMLTextAreaElement!=='undefined'&&input instanceof HTMLTextAreaElement
+    ?HTMLTextAreaElement.prototype
+    :typeof HTMLInputElement!=='undefined'&&input instanceof HTMLInputElement
+      ?HTMLInputElement.prototype
+      :Object.getPrototypeOf(input);
   const descriptor=Object.getOwnPropertyDescriptor(prototype,'value');
   try{
-    descriptor?.set?.call(input,value);
+    if(descriptor?.set)descriptor.set.call(input,value);
+    else input.value=value;
   }catch{
     input.value=value;
   }
@@ -270,6 +275,46 @@ function checkArticle(payload:{title:string;body:string;imageCount:number}){
     ?{ok:true}:{ok:false,message:'长文内容或配图未完整进入编辑器，请检查草稿'};
 }
 
+async function importMarkdownFile(payload:{title:string;markdown:string;fileName?:string}){
+  const editor=findFirst<HTMLElement>([ARTICLE_EDITOR]);
+  const title=findFirst<HTMLTextAreaElement>(['textarea[placeholder="输入标题"]']);
+  if(!editor||!title)return{ok:false,message:'长文编辑器未就绪'};
+  if(!payload.title?.trim()||payload.title.length>Number(title.maxLength||64))return{ok:false,message:'长文标题超出限制'};
+  setInputValue(title,payload.title);
+
+  let fileInput=document.querySelector<HTMLInputElement>('input[type="file"][accept*=".md"], input[type="file"][accept*=".docx"], input[type="file"][accept*=".txt"]');
+  if(!fileInput){
+    const importBtn=[...document.querySelectorAll<HTMLElement>('button, .import-btn, [role="button"], span')].find(el=>
+      isVisible(el)&&/(?:文档导入|导入文档)/.test(el.textContent||'')
+    );
+    if(importBtn){
+      importBtn.click();
+      await sleep(300);
+      fileInput=document.querySelector<HTMLInputElement>('input[type="file"][accept*=".md"], input[type="file"][accept*=".docx"], input[type="file"][accept*=".txt"]');
+    }
+  }
+
+  const file=new File([payload.markdown],payload.fileName||`${payload.title}.md`,{type:'text/markdown'});
+  if(fileInput){
+    const dt=new DataTransfer();
+    dt.items.add(file);
+    fileInput.files=dt.files;
+    fileInput.dispatchEvent(new Event('change',{bubbles:true}));
+  }else{
+    const dt=new DataTransfer();
+    dt.items.add(file);
+    editor.dispatchEvent(new DragEvent('drop',{bubbles:true,cancelable:true,dataTransfer:dt}));
+  }
+
+  await sleep(400);
+  const confirmBtn=[...document.querySelectorAll<HTMLButtonElement>('button')].find(b=>
+    isVisible(b)&&['确认','确定','继续导入'].includes((b.textContent||'').trim())
+  );
+  if(confirmBtn)confirmBtn.click();
+  await sleep(600);
+  return{ok:true};
+}
+
 /** 点击前武装只读事务观测，必须收到本次请求的保存凭证才报告成功。 */
 async function saveNote(payload:{accountId:string;title:string;body:string;imageCount:number}){
   const end=Date.now()+10000;
@@ -314,6 +359,7 @@ async function handleAction(action:string,payload:any){
     case 'GET_SESSION':return getSession();
     case 'UPLOAD_ARTICLE_FILE':return articlePageRequest('upload',payload);
     case 'IMPORT_ARTICLE':return importArticle(payload);
+    case 'IMPORT_MARKDOWN_FILE':return importMarkdownFile(payload);
     case 'PREPARE_ARTICLE':return prepareArticle();
     case 'FILL_ARTICLE':return fillArticle(payload);
     case 'APPEND_ARTICLE_HTML':return fillArticle(payload,true);
