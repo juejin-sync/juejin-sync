@@ -1,6 +1,6 @@
 // 双格式内容、图卡配方和任务身份回归，确保完整长文与精简图文不共用截断规则。
 import {describe,expect,it} from 'vitest';
-import {buildXiaohongshuImageContent,compileXiaohongshuArticle,compileXiaohongshuMarkdownDocument,imageKey,validateXiaohongshuImageContent,xhsWordCount} from '../src/targets/xiaohongshu-formats';
+import {buildXiaohongshuImageContent,compileXiaohongshuArticle,compileXiaohongshuMarkdownDocument,extractXiaohongshuShortTitle,imageKey,validateXiaohongshuImageContent,xhsWordCount} from '../src/targets/xiaohongshu-formats';
 import {findMatchingTask} from '../src/core/task';
 import {uniqueTasks,toStorageTask,migrateStoredTasks} from '../src/core/store';
 import type {Article,SyncTask} from '../src/types';
@@ -159,6 +159,27 @@ describe('精简图文配方',()=>{
     const content=buildXiaohongshuImageContent({...article,title:'这是一个完全没有分隔符而且超过二十字的技术文章标题'});
     expect(content.cards.length).toBeGreaterThan(0);expect(content.selectedImageKeys).toEqual([]);
     expect(()=>validateXiaohongshuImageContent(content)).toThrow('20');
+  });
+  it('中英文混排无标点长标题智能提炼动宾短标题，不把空格当分隔符误切为单字',()=>{
+    const title='用 Gitee Go 搭建WorkBuddy云端定时任务';
+    const shortTitle=extractXiaohongshuShortTitle(title);
+    expect(shortTitle).toBe('搭建WorkBuddy云端定时任务');
+    expect(shortTitle).not.toBe('用');
+    expect(shortTitle.length).toBeLessThanOrEqual(20);
+
+    const content=buildXiaohongshuImageContent({...article,title});
+    expect(content.title).toBe('搭建WorkBuddy云端定时任务');
+    expect(()=>validateXiaohongshuImageContent(content)).not.toThrow();
+  });
+  it('带冒号中英文长标题提取信息量完整且<=20字的分句，单字标题被拦截',()=>{
+    const longTitle='Vite 6.0 深度实战解析：企业生产级构建与性能优化';
+    const shortTitle=extractXiaohongshuShortTitle(longTitle);
+    expect(shortTitle.length).toBeGreaterThanOrEqual(4);
+    expect(shortTitle.length).toBeLessThanOrEqual(20);
+    expect(shortTitle).toBe('Vite 6.0 深度实战解析');
+
+    const content=buildXiaohongshuImageContent({...article,title:'技术'});
+    expect(()=>validateXiaohongshuImageContent({...content,title:'用'})).toThrow('2～20');
   });
   it('图片去重使用资源身份，data URL 不进入配方存储',()=>{
     const src='data:image/png;base64,AA==';
