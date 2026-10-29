@@ -154,7 +154,7 @@ async function pingOffscreen(timeoutMs=4000):Promise<boolean>{
   return false;
 }
 
-async function ensureOffscreenDocument():Promise<boolean>{
+export async function ensureOffscreenDocument():Promise<boolean>{
   if(typeof chrome==='undefined'||!chrome.offscreen?.createDocument)return false;
   if(creatingDocument)return creatingDocument;
   creatingDocument=(async()=>{

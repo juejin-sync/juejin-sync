@@ -1,47 +1,6 @@
-// 小红书内容编译回归测试：标题/正文/图片上限、降级规则与话题格式。
+// 小红书共享文本提取与话题清理；两种格式的内容编排在 formats 测试中验证。
 import {describe,expect,it} from 'vitest';
-import {
-  XHS_BODY_MAX,
-  XHS_IMAGE_MAX,
-  XHS_TITLE_MAX,
-  XHS_TOPIC_MAX_LENGTH,
-  buildXiaohongshuTitle,
-  compileXiaohongshuNote,
-  formatXiaohongshuTopics,
-  markdownToXiaohongshuText,
-  truncateXiaohongshuBody
-} from '../src/targets/xiaohongshu-content';
-import type {Article} from '../src/types';
-
-const baseArticle=(overrides:Partial<Article>={}):Article=>({
-  id:'juejin-xhs-1',
-  title:'掘金文章同步小红书测试',
-  markdown:'## 小节\n\n正文第一段。\n\n- 列表项一\n- 列表项二',
-  tags:['前端','效率工具'],
-  sourceUrl:'https://juejin.cn/post/1',
-  ...overrides
-});
-
-describe('小红书标题规则',()=>{
-  it(`超过 ${XHS_TITLE_MAX} 字按码点截断并保留省略号`,()=>{
-    const raw='这是一个非常非常长的掘金文章标题用于验证小红书标题截断规则';
-    const result=buildXiaohongshuTitle(raw);
-    expect([...result.title]).toHaveLength(XHS_TITLE_MAX);
-    expect(result.title.endsWith('…')).toBe(true);
-    expect(result.truncated).toBe(true);
-  });
-
-  it('保留 emoji 完整性（按码点而非 UTF-16 计数）',()=>{
-    const raw='🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀';
-    const result=buildXiaohongshuTitle(raw);
-    expect([...result.title]).toHaveLength(XHS_TITLE_MAX);
-  });
-
-  it('空标题与纯标记标题直接阻断',()=>{
-    expect(()=>buildXiaohongshuTitle('   ')).toThrow('小红书标题不能为空');
-    expect(()=>buildXiaohongshuTitle('**')).toThrow('小红书标题不能为空');
-  });
-});
+import {XHS_TOPIC_MAX_LENGTH,formatXiaohongshuTopics,markdownToXiaohongshuText} from '../src/targets/xiaohongshu-content';
 
 describe('小红书正文转换',()=>{
   it('标题降级为普通行，列表保留符号，引用去掉前缀',()=>{
@@ -90,23 +49,6 @@ describe('小红书正文转换',()=>{
   });
 });
 
-describe('小红书正文截断',()=>{
-  it(`超过 ${XHS_BODY_MAX} 字按句子边界截断并标记`,()=>{
-    const paragraph='这是用于验证截断行为的完整句子。';
-    const body=paragraph.repeat(80);
-    const result=truncateXiaohongshuBody(body);
-    expect(result.truncated).toBe(true);
-    expect([...result.text].length).toBeLessThanOrEqual(XHS_BODY_MAX);
-    expect(result.text.endsWith('…')).toBe(true);
-    expect(body.startsWith(result.text.slice(0,-1))).toBe(true);
-  });
-
-  it('未超限时保持原样',()=>{
-    const result=truncateXiaohongshuBody('短正文');
-    expect(result).toEqual({text:'短正文',truncated:false});
-  });
-});
-
 describe('小红书话题格式',()=>{
   it('去重、去标点并限制数量',()=>{
     const tags=['前端','前端','React 实践','Node.js','#已带井号','','   '];
@@ -122,96 +64,5 @@ describe('小红书话题格式',()=>{
   it('超长标签按单标签限长截断，避免尾部挤占正文',()=>{
     const topics=formatXiaohongshuTopics(['这是一个特别特别特别特别特别长的小红书话题标签']);
     expect([...topics.slice(1)]).toHaveLength(XHS_TOPIC_MAX_LENGTH);
-  });
-});
-
-describe('小红书笔记编译',()=>{
-  it('封面排在第一张，正文图片按出现顺序且去重',()=>{
-    const article=baseArticle({
-      cover:'https://p3.byteimg.com/cover.png',
-      markdown:'文字\n\n![图一](https://p3.byteimg.com/1.png)\n\n![图一重复](https://p3.byteimg.com/1.png)\n\n![图二](https://p3.byteimg.com/2.png)'
-    });
-    const note=compileXiaohongshuNote(article);
-    expect(note.images).toEqual([
-      'https://p3.byteimg.com/cover.png',
-      'https://p3.byteimg.com/1.png',
-      'https://p3.byteimg.com/2.png'
-    ]);
-  });
-
-  it('关闭封面同步时只保留正文图片',()=>{
-    const article=baseArticle({cover:'https://p3.byteimg.com/cover.png',markdown:'文字\n\n![图](https://p3.byteimg.com/1.png)'});
-    const note=compileXiaohongshuNote(article,{syncCover:false});
-    expect(note.images).toEqual(['https://p3.byteimg.com/1.png']);
-  });
-
-  it(`图片超过 ${XHS_IMAGE_MAX} 张时截断并警告`,()=>{
-    const images=Array.from({length:XHS_IMAGE_MAX+3},(_,index)=>`https://p3.byteimg.com/${index}.png`);
-    const article=baseArticle({markdown:`文字\n\n${images.map(src=>`![图](${src})`).join('\n\n')}`});
-    const note=compileXiaohongshuNote(article);
-    expect(note.images).toHaveLength(XHS_IMAGE_MAX);
-    expect(note.warnings).toEqual(expect.arrayContaining([`图片超过 ${XHS_IMAGE_MAX} 张上限，已保留前 ${XHS_IMAGE_MAX} 张`]));
-  });
-
-  it('没有任何图片时阻断同步',()=>{
-    const article=baseArticle({markdown:'只有文字，没有任何配图。'});
-    expect(()=>compileXiaohongshuNote(article)).toThrow('至少需要 1 张图片');
-  });
-
-  it('空正文阻断同步',()=>{
-    const article=baseArticle({markdown:'   ',cover:'https://p3.byteimg.com/cover.png'});
-    expect(()=>compileXiaohongshuNote(article)).toThrow('文章正文不完整');
-  });
-
-  it('追加话题与来源说明，来源不含外链',()=>{
-    const article=baseArticle({cover:'https://p3.byteimg.com/cover.png',tags:['前端'],sourceUrl:'https://juejin.cn/post/1'});
-    const note=compileXiaohongshuNote(article);
-    expect(note.body).toContain('#前端');
-    expect(note.body).toContain('本文首发于掘金');
-    expect(note.body).not.toContain('https://juejin.cn');
-    expect(note.warnings).toEqual(expect.arrayContaining(['已省略原文链接：小红书正文不支持外链']));
-  });
-
-  it('关闭来源说明时不追加任何链接文案',()=>{
-    const article=baseArticle({cover:'https://p3.byteimg.com/cover.png',sourceUrl:'https://juejin.cn/post/1'});
-    const note=compileXiaohongshuNote(article,{appendSourceLink:false});
-    expect(note.body).not.toContain('本文首发于掘金');
-  });
-
-  it('标题被截断时合并进警告列表',()=>{
-    const article=baseArticle({
-      title:'一二三四五六七八九十一二三四五六七八九十一二三四五',
-      cover:'https://p3.byteimg.com/cover.png'
-    });
-    const note=compileXiaohongshuNote(article);
-    expect(note.warnings).toEqual(expect.arrayContaining([`标题超过 ${XHS_TITLE_MAX} 字，已截断`]));
-  });
-
-  it('长文截断只截正文，话题与来源说明完整保留',()=>{
-    const article=baseArticle({
-      markdown:'这是一段用于验证截断预留策略的长正文。'.repeat(80),
-      cover:'https://p3.byteimg.com/cover.png',
-      tags:['前端','效率工具'],
-      sourceUrl:'https://juejin.cn/post/1'
-    });
-    const note=compileXiaohongshuNote(article);
-    expect([...note.body].length).toBeLessThanOrEqual(XHS_BODY_MAX);
-    expect(note.body).toContain('#前端 #效率工具');
-    expect(note.body.endsWith('本文首发于掘金')).toBe(true);
-    expect(note.body).toContain('…\n\n#前端');
-    expect(note.warnings).toEqual(expect.arrayContaining([`正文超过 ${XHS_BODY_MAX} 字，已截断`]));
-  });
-
-  it('尾部较长时仍不超出正文上限',()=>{
-    const tags=Array.from({length:10},(_,index)=>`标签${'超长'.repeat(10)}${index}`);
-    const article=baseArticle({
-      markdown:'正文内容较短但依然需要保证总长度合法。',
-      cover:'https://p3.byteimg.com/cover.png',
-      tags,
-      sourceUrl:'https://juejin.cn/post/1'
-    });
-    const note=compileXiaohongshuNote(article);
-    expect([...note.body].length).toBeLessThanOrEqual(XHS_BODY_MAX);
-    expect(note.body).toContain('#标签超长超长超长超长超长超长超长');
   });
 });

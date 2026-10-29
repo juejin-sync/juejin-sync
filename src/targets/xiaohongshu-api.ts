@@ -1,11 +1,14 @@
-// 小红书图文笔记适配器：页面驱动式草稿写入，复用浏览器登录态，全链路不点击发布。
-import type {Article,TaskProgress} from '../types';
+// 小红书长文与精简图文适配器：页面驱动式草稿写入，复用浏览器登录态，全链路不点击发布。
+import type {Article,TaskProgress,XiaohongshuFormat,XiaohongshuImageContent} from '../types';
 import type {AdapterResult} from './adapter';
 import {SyncError} from '../core/diagnostic';
 import {renderAllMermaidBlocks} from '../core/mermaid-render';
 import {downloadImageBlob,imageExtension} from './csdn-api';
-import {compileXiaohongshuNote} from './xiaohongshu-content';
+import {compileXiaohongshuArticle,validateXiaohongshuImageContent,xhsImageCandidates,imageKey} from './xiaohongshu-formats';
+import {normalizeXiaohongshuArticleImage} from '../core/xiaohongshu-image';
+import {renderXiaohongshuCards} from '../core/xiaohongshu-cards';
 import {parseXiaohongshuUser} from './xiaohongshu-capture';
+import {xhsArticleImageWeight} from './xiaohongshu-budget';
 
 export const XHS_PUBLISH_URL='https://creator.xiaohongshu.com/publish/publish';
 export const XHS_DRAFT_MANAGER_URL=XHS_PUBLISH_URL;
@@ -16,6 +19,8 @@ const TAB_TIMEOUT_MS=12000;
 export type XiaohongshuAuth={ok:boolean;loggedIn:boolean;account?:string;accountId?:string;message?:string};
 
 export interface XiaohongshuSaveOptions{
+  format?:XiaohongshuFormat;
+  imageContent?:XiaohongshuImageContent;
   expectedAccountId?:string;
   appendSourceLink?:boolean;
   syncCover?:boolean;
@@ -103,6 +108,16 @@ async function blobToBase64(blob:Blob){
   return btoa(binary);
 }
 
+async function prepareImage(src:string,format:XiaohongshuFormat){
+  let blob=await downloadImageBlob(src).catch(error=>{
+    throw new SyncError(`小红书图片下载失败：${(error as Error).message}`,'content','images');
+  });
+  if(format==='article')blob=await normalizeXiaohongshuArticleImage(blob);
+  if(blob.size>(format==='article'?10*1024*1024:MAX_IMAGE_BYTES))throw new SyncError(`小红书${format==='article'?'长文图片超过 10MB':'图文图片超过 32MB'}，已停止保存`,'content','images');
+  if(!['image/jpeg','image/png','image/webp'].includes(blob.type))throw new SyncError('小红书图片仅支持 JPG、PNG、WebP，请转换图片格式后重试','content','images');
+  return blob;
+}
+
 /** 给失败任务补上“已保存但结果不确定”时的草稿入口，避免用户重复创建。 */
 function attachDraftMeta(error:SyncError,meta:{articleId?:string;draftUrl?:string}){
   return Object.assign(error,meta);
@@ -110,21 +125,44 @@ function attachDraftMeta(error:SyncError,meta:{articleId?:string;draftUrl?:strin
 
 export async function saveXiaohongshuDraft(article:Article,options:XiaohongshuSaveOptions={}):Promise<AdapterResult>{
   const warnings:string[]=[];
-  let note;
+  const format=options.format||'article';
+  let note:{title:string;body:string;images:string[];warnings:string[]};
+  let articleHtml='';
+  const articleImages:Array<{blob:Blob;width:number;height:number}>=[];
   try{
     const mermaidImages=await renderAllMermaidBlocks(article.markdown);
-    note=compileXiaohongshuNote(article,{
-      appendSourceLink:options.appendSourceLink,
-      syncCover:options.syncCover,
-      mermaidImages
-    });
+    if(format==='article'){
+      let content=compileXiaohongshuArticle(article,{mermaidImages,appendSourceLink:options.appendSourceLink});
+      // 保存前按真实配图预留预算，随后复用同一 Blob 上传，避免上传后才发现总字数超限。
+      let imageWeight=0;
+      for(const src of content.images){
+        const blob=await prepareImage(src,format),bitmap=await createImageBitmap(blob);
+        try{
+          imageWeight+=xhsArticleImageWeight(410,410*bitmap.height/bitmap.width);
+          articleImages.push({blob,width:bitmap.width,height:bitmap.height});
+        }finally{bitmap.close();}
+      }
+      if(articleImages.length)content=compileXiaohongshuArticle(article,{mermaidImages,appendSourceLink:options.appendSourceLink,imageWeight});
+      articleHtml=content.html;
+      note={title:content.title,body:content.text,images:content.images,warnings:content.warnings};
+    }else{
+      if(!options.imageContent)throw new SyncError('旧精简图文任务缺少内容配方，请从掘金重新发起同步','blocked','content');
+      validateXiaohongshuImageContent(options.imageContent);
+      const candidates=xhsImageCandidates(article,mermaidImages);
+      const selected=options.imageContent.selectedImageKeys.map(key=>{
+        const src=candidates.find(src=>imageKey(src)===key);
+        if(!src)throw new SyncError('原文配图已变化，请从掘金重新发起同步','blocked','images');
+        return src;
+      });
+      const cards=await renderXiaohongshuCards(options.imageContent.cards);
+      if(cards.length+selected.length>18)throw new SyncError('图卡分页与配图合计超过18张，请精简原文配图或选择仅长文','content','images');
+      note={title:options.imageContent.title,body:options.imageContent.body,images:[...cards,...selected],warnings:['精简内容由本地规则抽取，请在平台草稿箱核对内容与排版']};
+    }
   }catch(error){
     if(error instanceof SyncError)throw error;
     throw new SyncError(`小红书内容编译失败：${(error as Error).message}`,'content','content');
   }
-  warnings.push(...note.warnings);
-
-  warnings.push('草稿仅保存在当前浏览器本地；清除浏览器数据会删除草稿，重复同步会新建草稿。');
+  warnings.push(...note.warnings,'草稿仅保存在当前浏览器本地；清除浏览器数据会删除草稿，重复同步会新建草稿。');
   const session=await acquireXiaohongshuTab();
   let pageTouched=false;
   let savedSuccessfully=false;
@@ -135,35 +173,46 @@ export async function saveXiaohongshuDraft(article:Article,options:XiaohongshuSa
     if(!auth.accountId)throw new SyncError('无法确认小红书账号身份，已阻止写入草稿','blocked','authentication');
     if(options.expectedAccountId&&auth.accountId!==options.expectedAccountId)throw new SyncError('当前小红书账号与任务创建时不一致，已阻止写入草稿','blocked','authentication');
     await options.onPreparing?.();
-    const prepared=await sendBridgeMessage<{ok:boolean;message?:string}>(session.tabId,'PREPARE_IMAGE_NOTE');
+    const prepared=await sendBridgeMessage<{ok:boolean;message?:string}>(session.tabId,format==='article'?'PREPARE_ARTICLE':'PREPARE_IMAGE_NOTE');
     if(!prepared?.ok)throw new SyncError(prepared?.message||'无法进入小红书图文上传页','platform-change','content');
 
     let uploaded=0;
+    const importedImages:Array<{src:string;width:number;height:number}>=[];
     for(let index=0;index<note.images.length;index++){
       const src=note.images[index];
-      const blob=await downloadImageBlob(src).catch(error=>{
-        throw new SyncError(`小红书图片下载失败：${(error as Error).message}`,'content','images');
-      });
-      if(blob.size>MAX_IMAGE_BYTES)throw new SyncError('小红书图片超过 32MB，已停止保存','content','images');
-      if(!['image/jpeg','image/png','image/webp'].includes(blob.type))throw new SyncError('小红书图片仅支持 JPG、PNG、WebP，请转换图片格式后重试','content','images');
+      const blob=format==='article'?articleImages[index].blob:await prepareImage(src,format);
       const base64=await blobToBase64(blob);
       // 图片进入页面后平台可能自动保存；从此刻开始中断不得自动重试。
-      if(!pageTouched){await options.onSaving?.();pageTouched=true;}
+      if(format==='image'&&!pageTouched){await options.onSaving?.();pageTouched=true;}
       await options.onProgress?.({current:index,total:note.images.length,message:`正在上传小红书图片 ${index+1}/${note.images.length}`});
-      const result=await sendBridgeMessage<{ok:boolean;message?:string}>(session.tabId,'UPLOAD_IMAGE',{
-        base64,mime:blob.type,name:`xiaohongshu-${index+1}.${imageExtension(src,blob)}`,imageCount:index+1
+      const result=await sendBridgeMessage<{ok:boolean;message?:string;src?:string}>(session.tabId,format==='article'?'UPLOAD_ARTICLE_FILE':'UPLOAD_IMAGE',{
+        accountId:auth.accountId,base64,mime:blob.type,name:`xiaohongshu-${index+1}.${imageExtension(src,blob)}`,imageCount:index+1
       });
       if(!result?.ok)throw new SyncError(result?.message||'小红书图片上传未完成','content','images');
       uploaded++;
+      if(format==='article'){
+        if(!result.src)throw new SyncError('长文配图缺少上传地址','content','images');
+        const image=articleImages[index];importedImages.push({src:result.src,width:image.width,height:image.height});
+      }
     }
-    const ready=await sendBridgeMessage<{ok:boolean;message?:string}>(session.tabId,'WAIT_EDITOR',{timeoutMs:20000});
-    if(!ready?.ok)throw new SyncError(ready?.message||'小红书编辑器加载超时','platform-change','content');
-    const filled=await sendBridgeMessage<{ok:boolean;message?:string}>(session.tabId,'FILL_TEXT',{title:note.title,body:note.body});
-    if(!filled?.ok)throw new SyncError(filled?.message||'小红书编辑器填充失败','platform-change','content');
+    if(format==='article'){
+      await options.onSaving?.();pageTouched=true;
+      const saved=await sendBridgeMessage<{ok:boolean;draftId?:string;accountId?:string;message?:string}>(session.tabId,'IMPORT_ARTICLE',{
+        draftId:crypto.randomUUID(),accountId:auth.accountId,title:note.title,body:note.body,html:articleHtml,images:importedImages
+      });
+      if(!saved?.ok||!saved.draftId||saved.accountId!==auth.accountId)throw new SyncError(saved?.message||'长文草稿导入未确认成功','interrupted','draft');
+      savedSuccessfully=true;
+      return{draftUrl:XHS_DRAFT_MANAGER_URL,articleId:saved.draftId,warnings,stats:{imageTotal:note.images.length,imageSucceeded:uploaded,imageFailed:0}};
+    }else{
+      const ready=await sendBridgeMessage<{ok:boolean;message?:string}>(session.tabId,'WAIT_EDITOR',{timeoutMs:20000});
+      if(!ready?.ok)throw new SyncError(ready?.message||'小红书编辑器加载超时','platform-change','content');
+      const filled=await sendBridgeMessage<{ok:boolean;message?:string}>(session.tabId,'FILL_TEXT',{title:note.title,body:note.body});
+      if(!filled?.ok)throw new SyncError(filled?.message||'小红书编辑器填充失败','platform-change','content');
+    }
     const reAuth=await sendBridgeMessage<XiaohongshuAuth>(session.tabId,'GET_SESSION');
     if(!reAuth?.ok||!reAuth.loggedIn||reAuth.accountId!==auth.accountId)throw new SyncError('小红书登录账号在同步过程中发生变更，已阻断写入','blocked','authentication');
     const saved=await sendBridgeMessage<{ok:boolean;draftId?:string;accountId?:string;message?:string}>(session.tabId,'SAVE_NOTE',{
-      accountId:auth.accountId,title:note.title,body:note.body,imageCount:note.images.length
+      format,accountId:auth.accountId,title:note.title,body:note.body,imageCount:note.images.length
     });
     if(!saved?.ok||!saved.draftId||saved.accountId!==auth.accountId)throw new SyncError(saved?.message||'无法确认小红书本地草稿是否完整保存','interrupted','draft');
     savedSuccessfully=true;

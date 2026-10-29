@@ -57,7 +57,7 @@ describe('小红书任务身份',()=>{
 describe('小红书通知与健康度',()=>{
   it('成功通知目的地为小红书草稿箱',()=>{
     const notification=buildTaskNotification(task({draftUrl:'https://creator.xiaohongshu.com/publish/publish',stats:{imageTotal:3,imageSucceeded:3,imageFailed:0,durationMs:1000}}),1000);
-    expect(notification).toMatchObject({kind:'saved',title:'文章已抵达 小红书本地草稿箱'});
+    expect(notification).toMatchObject({kind:'saved',title:'文章已抵达 小红书图文本地草稿箱'});
   });
 
   it('小红书标记为 broken 时触发健康警示',()=>{

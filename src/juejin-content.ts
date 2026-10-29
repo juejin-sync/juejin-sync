@@ -1,9 +1,11 @@
 // 掘金页面集成：新文章在发布成功后同步，历史文章通过统一弹窗立即同步。
-import type {Article,PlatformId,SyncTask} from './types';
+import type {Article,PlatformId,SyncTask,XiaohongshuFormat} from './types';
 import {extractArticleId} from './source/juejin-api';
 import {CNBLOGS_LOGO,CSDN_LOGO,WECHAT_LOGO,XIAOHONGSHU_LOGO,ZHIHU_LOGO} from './targets/logos';
 import {refreshPlatformSelection,syncReplyState} from './core/sync-dialog';
 import {SUPPORTED_PLATFORMS} from './core/message';
+import {xhsFormats,xhsFormatLabel} from './core/xiaohongshu-mode';
+import type {XiaohongshuMode} from './types';
 import {BatchSyncQueue,type BatchTaskItem,type BatchStats} from './core/batch-queue';
 
 type EditorSnapshot={title:string;markdown:string;draftId:string;sourceUrl:string;tags?:string[];cover?:string;summary?:string};
@@ -20,7 +22,7 @@ const PLATFORM_META:Record<PlatformId,{name:string;badge:string;logo:string;chec
   wechat:{name:'微信公众号',badge:'图文草稿',logo:WECHAT_LOGO,check:'CHECK_WECHAT_STATUS',login:'OPEN_WECHAT_LOGIN'},
   cnblogs:{name:'博客园',badge:'随笔草稿',logo:CNBLOGS_LOGO,check:'CHECK_CNBLOGS_STATUS',login:'OPEN_CNBLOGS_LOGIN'},
   zhihu:{name:'知乎',badge:'文章草稿',logo:ZHIHU_LOGO,check:'CHECK_ZHIHU_STATUS',login:'OPEN_ZHIHU_LOGIN'},
-  xiaohongshu:{name:'小红书',badge:'本地图文草稿',logo:XIAOHONGSHU_LOGO,check:'CHECK_XIAOHONGSHU_STATUS',login:'OPEN_XIAOHONGSHU_LOGIN'}
+  xiaohongshu:{name:'小红书',badge:'长文 / 精简图文',logo:XIAOHONGSHU_LOGO,check:'CHECK_XIAOHONGSHU_STATUS',login:'OPEN_XIAOHONGSHU_LOGIN'}
 };
 let syncedIds:Promise<Set<string>>|undefined;
 let currentDialogRefresh:(()=>Promise<void>)|null=null;
@@ -28,10 +30,15 @@ let currentPublishRefresh:(()=>Promise<void>)|null=null;
 let publishPanel:HTMLElement|null=null;
 let publishSelected=new Set<PlatformId>();
 let publishAuths:PlatformAuth[]=[];
+async function readXhsMode():Promise<XiaohongshuMode>{
+  const result=await safeSendMessage({type:'GET_SETTINGS'});
+  if(!result?.ok)throw new Error('无法读取小红书同步偏好，请刷新页面后重试');
+  return result.settings.xiaohongshuMode||'both';
+}
 const selectedArticles=new Map<string,{articleId:string;title:string}>();
 let currentBatchQueue:BatchSyncQueue|null=null;
 // 请求快照独立于面板生命周期；关闭面板不会丢失已提交的同步意图。
-type PendingPublish={article?:Article;error?:string;platforms:PlatformId[];auths:PlatformAuth[];panel:HTMLElement|null;selection:Set<PlatformId>};
+type PendingPublish={xiaohongshuMode:Promise<XiaohongshuMode>;article?:Article;error?:string;platforms:PlatformId[];auths:PlatformAuth[];panel:HTMLElement|null;selection:Set<PlatformId>};
 const pendingPublishes=new Map<string,PendingPublish>();
 
 function isExtensionAlive():boolean{
@@ -142,6 +149,29 @@ function platformCard(auth:PlatformAuth,selected:boolean){
     </div>
     <div class="jc-card-control">${actionHtml}</div>
   </div>`;
+}
+
+async function syncXiaohongshuInBackground(source:{article?:Article;articleId?:string;title?:string;uuid?:string},mode:XiaohongshuMode,accountId?:string,shouldContinue=()=>true){
+  const results:Array<{format:XiaohongshuFormat;saved:boolean;message:string;draftUrl?:string}>=[];
+  let frozenSource=source;
+  for(const format of xhsFormats(mode)){
+    try{
+      if(!shouldContinue()){results.push({format,saved:false,message:'已跳过'});continue;}
+      const prepared=await safeSendMessage({type:'PREPARE_XIAOHONGSHU_CONTENT',...frozenSource,xiaohongshuFormat:format});
+      if(!prepared?.ok)throw new Error(prepared?.message||'小红书内容准备失败');
+      const content={article:prepared.article as Article,imageContent:prepared.imageContent};
+      if(!shouldContinue()){results.push({format,saved:false,message:'已跳过'});continue;}
+      frozenSource={article:content.article};
+      const result=await safeSendMessage({type:'SYNC_NEW_ARTICLE',platform:'xiaohongshu',accountId,article:content.article,xiaohongshuFormat:format,xiaohongshuImageContent:content.imageContent});
+      const state=syncReplyState(result);
+      if(state.saved)rememberSynced(content.article.id,'xiaohongshu',format);
+      results.push({format,...state,draftUrl:result?.task?.draftUrl});
+    }catch(error){results.push({format,saved:false,message:(error as Error).message});}
+  }
+  const message=results.map(r=>`${xhsFormatLabel(r.format)}：${r.message}`).join('；');
+  const skipped=results.every(r=>r.message==='已跳过');
+  if(results.some(r=>!r.saved)&&!skipped)throw new Error(message);
+  return{saved:results.every(r=>r.saved),message,draftUrl:results.at(-1)?.draftUrl,skipped};
 }
 
 async function openSyncDialog(source:SyncSource,trigger:HTMLElement){
@@ -313,6 +343,10 @@ async function openSyncDialog(source:SyncSource,trigger:HTMLElement){
         const currentAuth=auths.find(item=>item.platform===platform);
         const accountId=currentAuth?.accountId;
         if(platform==='wechat'&&!accountId)throw new Error('无法确认公众号身份，请重新检测登录状态');
+        if(platform==='xiaohongshu'){
+          const state=await syncXiaohongshuInBackground({articleId:source.articleId,title:source.title,uuid:getJuejinUuid()},await readXhsMode(),accountId);
+          return{platform,ok:true,...state};
+        }
         const result=await safeSendMessage({type:'SYNC_HISTORY_ARTICLE',platform,articleId:source.articleId,title:source.title,sourceUrl:`https://juejin.cn/post/${source.articleId}`,uuid:getJuejinUuid(),wechatAccountId:platform==='wechat'?accountId:undefined,accountId});
         if(result===undefined)throw new Error('扩展已重载，请刷新网页后重试');
         const state=syncReplyState(result);
@@ -397,6 +431,9 @@ function injectPublishIntegration(){
     </div>
     <div class="jc-publish-sync-tip">掘金发布成功后自动保存至所选平台的草稿箱</div>
   </div>`;
+  const xhsCard=document.createElement('label');xhsCard.className='jc-publish-platform is-unlogged';xhsCard.dataset.platform='xiaohongshu';
+  xhsCard.innerHTML=`<input type="checkbox" class="jc-platform-input" data-platform="xiaohongshu" disabled><span class="jc-platform-checkbox" aria-hidden="true">✓</span><img src="${XIAOHONGSHU_LOGO}" class="jc-platform-icon" alt=""><span class="jc-platform-name">小红书</span><span class="jc-platform-status"><span class="jc-publish-spinner"></span></span>`;
+  field.querySelector('.jc-publish-platforms')!.appendChild(xhsCard);
   panel.insertBefore(field,footer);
 
   let refreshing=false;
@@ -412,6 +449,7 @@ function injectPublishIntegration(){
         publishSelected.delete(platform);
       }
       card.classList.toggle('is-selected',input.checked);
+
     });
 
     card.addEventListener('click',event=>{
@@ -470,6 +508,7 @@ function injectPublishIntegration(){
       if(publishPanel!==panel||!field.isConnected||currentPublishRefresh!==refresh)return;
       publishAuths=freshAuths;
       publishAuths.forEach(updateCardAuth);
+
     }finally{
       refreshing=false;
     }
@@ -493,7 +532,9 @@ function handleJuejinPublishStart(){
   let requestId:string;
   try{requestId=JSON.parse(raw).requestId;}catch{return;}
   if(!requestId||pendingPublishes.has(requestId))return;
-  const pending:PendingPublish={platforms:[...publishSelected],auths:publishAuths.map(auth=>({...auth})),panel:publishPanel,selection:publishSelected};
+  const mode=publishSelected.has('xiaohongshu')?readXhsMode():Promise.resolve('both' as const);
+  void mode.catch(()=>{});
+  const pending:PendingPublish={xiaohongshuMode:mode,platforms:[...publishSelected],auths:publishAuths.map(auth=>({...auth})),panel:publishPanel,selection:publishSelected};
   try{
     pending.article=readEditorArticle();
     console.log('[掘金同步助手] 已记录发布前文章快照:',pending.article.title,'目标平台:',pending.platforms);
@@ -541,6 +582,7 @@ function handleJuejinPublished(){
       const currentAuth=auths.find(item=>item.platform===platform);
       const accountId=currentAuth?.accountId;
       if(platform==='wechat'&&!accountId)throw new Error('微信公众号身份已失效，请从文章列表重新同步');
+      if(platform==='xiaohongshu')return{platform,...await syncXiaohongshuInBackground({article},await pending.xiaohongshuMode,accountId)};
       const result=await safeSendMessage({type:'SYNC_NEW_ARTICLE',platform,article,wechatAccountId:platform==='wechat'?accountId:undefined,accountId});
       if(result===undefined)throw new Error('扩展已重载，请刷新网页后从文章列表重试');
       return{platform,...syncReplyState(result)};
@@ -562,8 +604,10 @@ function syncedArticleIds(){
       const ids=new Set<string>();
       for(const task of((result?.tasks||[]) as SyncTask[]))if(task.status==='saved'){
         if(task.article?.id)ids.add(`${task.platform}:${task.article.id}`);
+        if(task.platform==='xiaohongshu')ids.add(`xiaohongshu:${task.xiaohongshuFormat||'image'}:${task.article.id}`);
         const sourceId=task.article?.sourceUrl?extractArticleId(task.article.sourceUrl):'';
         if(sourceId)ids.add(`${task.platform}:${sourceId}`);
+        if(sourceId&&task.platform==='xiaohongshu')ids.add(`xiaohongshu:${task.xiaohongshuFormat||'image'}:${sourceId}`);
       }
       return ids;
     }).catch(()=>{
@@ -576,7 +620,7 @@ function syncedArticleIds(){
   return syncedIds;
 }
 
-function rememberSynced(articleId:string,platform:PlatformId){void syncedArticleIds().then(ids=>ids.add(`${platform}:${articleId}`));}
+function rememberSynced(articleId:string,platform:PlatformId,format?:XiaohongshuFormat){void syncedArticleIds().then(ids=>{ids.add(`${platform}:${articleId}`);if(platform==='xiaohongshu'&&format)ids.add(`xiaohongshu:${format}:${articleId}`);});}
 
 async function markSyncedButtons(){
   const buttons=document.querySelectorAll<HTMLElement>('.jc-history-sync,.jc-creator-sync');
@@ -584,7 +628,7 @@ async function markSyncedButtons(){
   const ids=await syncedArticleIds();
   buttons.forEach(button=>{
     const articleId=button.dataset.articleId||'';
-    if(button.dataset.state==='idle'&&(ids.has(`csdn:${articleId}`)||ids.has(`wechat:${articleId}`)||ids.has(`cnblogs:${articleId}`)||ids.has(`zhihu:${articleId}`)))setSyncButtonState(button,'saved','已同步，可再次选择');
+    if(button.dataset.state==='idle'&&(ids.has(`csdn:${articleId}`)||ids.has(`wechat:${articleId}`)||ids.has(`cnblogs:${articleId}`)||ids.has(`zhihu:${articleId}`)||ids.has(`xiaohongshu:${articleId}`)))setSyncButtonState(button,'saved','已同步，可再次选择');
   });
 }
 
@@ -671,7 +715,7 @@ async function filterUnsyncedArticles(){
     const articleId=cb.dataset.articleId||'';
     const title=cb.dataset.title||'';
     if(!articleId)return;
-    const isSynced=ids.has(`csdn:${articleId}`)&&ids.has(`wechat:${articleId}`)&&ids.has(`cnblogs:${articleId}`)&&ids.has(`zhihu:${articleId}`);
+    const isSynced=ids.has(`csdn:${articleId}`)&&ids.has(`wechat:${articleId}`)&&ids.has(`cnblogs:${articleId}`)&&ids.has(`zhihu:${articleId}`)&&ids.has(`xiaohongshu:article:${articleId}`);
     if(!isSynced){
       cb.checked=true;
       selectedArticles.set(articleId,{articleId,title});
@@ -891,7 +935,7 @@ function openBatchSyncWizard(){
           </div>
           <div class="jc-note-content">
             <div class="jc-estimate-summary">
-              <b>已选 <span id="jc-est-articles">${selectedList.length}</span> 篇文章 × <span id="jc-est-platforms">0</span> 个平台 = <span id="jc-est-tasks">0</span> 个同步任务</b>，预计耗时约 <span id="jc-est-duration">3</span> 秒。
+              <b>已选 <span id="jc-est-articles">${selectedList.length}</span> 篇文章 · <span id="jc-est-platforms">0</span> 个平台，共 <span id="jc-est-tasks">0</span> 份草稿</b>，预计耗时约 <span id="jc-est-duration">3</span> 秒。
             </div>
             <span>🛡️ 已启用稳健防风控限速队列（单平台并发隔离与冷却，任务间注入 1.0~2.5s 动态随机抖动延迟，保障账号安全）。</span>
           </div>
@@ -960,6 +1004,11 @@ function openBatchSyncWizard(){
   root.querySelector('.jc-dialog-close')?.addEventListener('click',closeDialog);
   root.querySelector('.jc-batch-cancel-btn')?.addEventListener('click',closeDialog);
 
+  let batchMode:XiaohongshuMode='both';
+  let modeReady=false;
+  void readXhsMode().then(mode=>{batchMode=mode;modeReady=true;updateEstimate();}).catch(()=>{
+    const status=root.querySelector('.jc-selected-count');if(status)status.textContent='无法读取小红书同步偏好，请关闭向导后重试';
+  });
   const updateEstimate=()=>{
     const articlesCount=selectedList.length;
     // 严格过滤仅保留已登录且用户勾选的平台
@@ -968,7 +1017,8 @@ function openBatchSyncWizard(){
       return auth&&auth.loggedIn===true;
     });
     const platformsCount=validPlatforms.length;
-    const taskCount=articlesCount*platformsCount;
+
+    const taskCount=articlesCount*(platformsCount+(validPlatforms.includes('xiaohongshu')&&batchMode==='both'?1:0));
     const estDuration=Math.max(3,Math.ceil((taskCount/2)*2.5));
 
     const estArticles=root.querySelector('#jc-est-articles');
@@ -982,7 +1032,7 @@ function openBatchSyncWizard(){
 
     const hasSelected=articlesCount>0&&platformsCount>0;
     const startBtn=root.querySelector<HTMLButtonElement>('.jc-batch-start-btn');
-    if(startBtn)startBtn.disabled=!hasSelected||refreshing;
+    if(startBtn)startBtn.disabled=!hasSelected||refreshing||(validPlatforms.includes('xiaohongshu')&&!modeReady);
 
     const footerStatus=root.querySelector<HTMLElement>('.jc-footer-status');
     const selectedCount=root.querySelector<HTMLElement>('.jc-selected-count');
@@ -1128,6 +1178,9 @@ function openBatchSyncWizard(){
   // 启动批量同步
   const startBtn=root.querySelector<HTMLButtonElement>('.jc-batch-start-btn');
   startBtn?.addEventListener('click',async()=>{
+    if(platformsSelected.has('xiaohongshu')){
+      try{batchMode=await readXhsMode();updateEstimate();}catch(error){alert((error as Error).message);return;}
+    }
     // 严格过滤仅保留已登录且勾选的平台
     const validPlatforms=[...platformsSelected].filter(p=>{
       const auth=modalAuths.find(a=>a.platform===p);
@@ -1147,8 +1200,9 @@ function openBatchSyncWizard(){
     const tasks:BatchTaskItem[]=[];
     for(const article of selectedList){
       for(const platform of validPlatforms){
-        tasks.push({
-          id:`${article.articleId}:${platform}`,
+        for(const format of platform==='xiaohongshu'?xhsFormats(batchMode):[undefined])tasks.push({
+          id:`${article.articleId}:${platform}:${format||''}`,
+          xiaohongshuFormat:format,
           articleId:article.articleId,
           title:article.title,
           platform,
@@ -1159,9 +1213,9 @@ function openBatchSyncWizard(){
 
     const logList=root.querySelector<HTMLElement>('#jc-batch-log-list')!;
     logList.innerHTML=tasks.map(t=>`
-      <div class="jc-batch-log-item" id="jc-log-${t.articleId}-${t.platform}">
+      <div class="jc-batch-log-item" id="jc-log-${t.articleId}-${t.platform}${t.xiaohongshuFormat?'-'+t.xiaohongshuFormat:''}">
         <div class="jc-batch-log-info">
-          <span class="jc-batch-log-platform">${PLATFORM_META[t.platform].name}</span>
+          <span class="jc-batch-log-platform">${PLATFORM_META[t.platform].name}${t.xiaohongshuFormat?' · '+xhsFormatLabel(t.xiaohongshuFormat):''}</span>
           <span class="jc-batch-log-title" title="${escapeHtml(t.title)}">${escapeHtml(t.title)}</span>
         </div>
         <span class="jc-batch-log-status is-pending">排队中</span>
@@ -1185,7 +1239,7 @@ function openBatchSyncWizard(){
       }else if(stats.state==='stopped'){
         statText.textContent='⏹ 批量同步已终止';
       }else if(stats.state==='completed'){
-        statText.textContent=`🎉 批量同步完成！成功 ${stats.success} 篇，失败 ${stats.failed} 篇`;
+        statText.textContent=`🎉 批量同步完成！成功 ${stats.success} 份，失败 ${stats.failed} 份`;
       }else{
         statText.textContent=`正在同步：${escapeHtml(item.title)} → ${PLATFORM_META[item.platform].name}`;
       }
@@ -1205,7 +1259,7 @@ function openBatchSyncWizard(){
       }
 
       // 更新单项 DOM
-      const itemEl=root.querySelector<HTMLElement>(`#jc-log-${item.articleId}-${item.platform}`);
+      const itemEl=root.querySelector<HTMLElement>(`#jc-log-${item.articleId}-${item.platform}${item.xiaohongshuFormat?'-'+item.xiaohongshuFormat:''}`);
       if(itemEl){
         const statusSpan=itemEl.querySelector('.jc-batch-log-status');
         if(statusSpan){
@@ -1260,6 +1314,10 @@ function openBatchSyncWizard(){
         const uuid=getJuejinUuid();
         const currentAuth=modalAuths.find(a=>a.platform===item.platform);
         const accountId=currentAuth?.accountId;
+        if(item.platform==='xiaohongshu'){
+          const state=await syncXiaohongshuInBackground({articleId:item.articleId,title:item.title,uuid},item.xiaohongshuFormat!,accountId,()=>root.isConnected&&currentBatchQueue?.getStats().state!=='stopped');
+          return{ok:state.saved,draftUrl:state.draftUrl,skipped:state.skipped,error:state.message};
+        }
         const result=await safeSendMessage({
           type:'SYNC_HISTORY_ARTICLE',
           articleId:item.articleId,

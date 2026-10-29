@@ -33,10 +33,10 @@ function field(){
   const cards=new Map(['csdn','wechat'].map(platform=>{
     const input={checked:false,disabled:true,addEventListener:vi.fn()};
     const status={innerHTML:''};
-    const card={classList:{add:vi.fn(),remove:vi.fn(),toggle:vi.fn()},addEventListener:vi.fn(),querySelector:(selector:string)=>selector==='.jc-platform-input'?input:status};
+    const card={appendChild:vi.fn(),classList:{add:vi.fn(),remove:vi.fn(),toggle:vi.fn()},addEventListener:vi.fn(),querySelector:(selector:string)=>selector==='.jc-platform-input'?input:status};
     return[platform,card];
   }));
-  return{isConnected:true,setAttribute:vi.fn(),innerHTML:'',className:'',querySelector:(selector:string)=>cards.get(selector.includes('csdn')?'csdn':'wechat')};
+  return{dataset:{},appendChild:vi.fn(),isConnected:true,setAttribute:vi.fn(),innerHTML:'',className:'',querySelector:(selector:string)=>cards.get(selector.includes('csdn')?'csdn':'wechat')};
 }
 function panel(){
   let injected:ReturnType<typeof field>|undefined;
@@ -60,6 +60,21 @@ function contentHarness(){
 }
 
 describe('发布快照与面板状态',()=>{
+  it('小红书后台双格式使用发布时偏好，不创建预览，部分成功不重发成功格式',async()=>{
+    const h=contentHarness();let mode='both';
+    h.chrome.runtime.sendMessage.mockImplementation(async(message:any)=>{
+      if(message.type==='GET_SETTINGS')return{ok:true,settings:{xiaohongshuMode:mode}};
+      if(message.type==='PREPARE_XIAOHONGSHU_CONTENT')return{ok:true,article:message.article,imageContent:message.xiaohongshuFormat==='image'?{title:'精简',body:'重点',cards:[],selectedImageKeys:[]}:undefined};
+      if(message.type==='SYNC_NEW_ARTICLE')return{ok:true,task:{status:message.xiaohongshuFormat==='article'?'saved':'failed',error:'图文失败'}};
+      return{ok:true,loggedIn:true,accountId:'xhs-account'};
+    });
+    h.api.injectPublishIntegration();await flush();h.api.select('xiaohongshu');h.emit('xhs');await flush();mode='article';h.emit('xhs',true);await flush();await flush();
+    const calls=h.chrome.runtime.sendMessage.mock.calls.map(([message])=>message).filter(message=>message.type==='SYNC_NEW_ARTICLE');
+    expect(calls.map(message=>message.xiaohongshuFormat)).toEqual(['article','image']);
+    expect(calls.every(message=>message.article.title===initialSnapshot.title)).toBe(true);
+    expect(h.chrome.runtime.sendMessage.mock.calls.some(([message])=>message.type==='PREVIEW_XIAOHONGSHU')).toBe(false);
+  });
+
   it('关闭面板并修改正文后，仍同步请求发出时的内容和账号，重复成功事件不重复创建',async()=>{
     const h=contentHarness();h.api.injectPublishIntegration();await flush();h.api.select('wechat');h.emit('one');
     h.api.resetPublishSelection();h.setSnapshot({...initialSnapshot,title:'后续修改的标题'});h.emit('one',true);h.emit('one',true);await flush();

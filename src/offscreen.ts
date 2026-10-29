@@ -1,5 +1,6 @@
 // 离屏渲染模块：为 Service Worker 提供 Chromium DOM 环境，将 Mermaid 渲染为高清 PNG 图片。
 import mermaid from 'mermaid';
+import {renderCards} from './xiaohongshu-card-render';
 
 mermaid.initialize({
   startOnLoad: false,
@@ -122,6 +123,23 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message?.target === 'offscreen' && message?.type === 'PING') {
     sendResponse({ ok: true });
     return;
+  }
+  if(message?.target==='offscreen'&&message?.type==='XHS_IMAGE_TO_PNG'){
+    (async()=>{
+      const bitmap=await createImageBitmap(await (await fetch(message.src)).blob());
+      try{
+        const canvas=document.createElement('canvas');canvas.width=bitmap.width;canvas.height=bitmap.height;
+        const ctx=canvas.getContext('2d');if(!ctx)throw new Error('Canvas 不可用');
+        ctx.drawImage(bitmap,0,0);sendResponse({ok:true,dataUrl:canvas.toDataURL('image/png')});
+      }finally{bitmap.close();}
+    })().catch(error=>sendResponse({ok:false,error:error.message}));
+    return true;
+  }
+  if(message?.target==='offscreen'&&message?.type==='RENDER_XHS_CARDS'){
+    const rendering=renderQueue.then(()=>renderCards(message.cards));
+    renderQueue=rendering.catch(()=>{});
+    rendering.then(images=>sendResponse({ok:true,images})).catch(error=>sendResponse({ok:false,error:error.message}));
+    return true;
   }
   if (message?.target === 'offscreen' && message?.type === 'RENDER_MERMAID') {
     const rendering = renderQueue.then(() => renderMermaid(message.code));

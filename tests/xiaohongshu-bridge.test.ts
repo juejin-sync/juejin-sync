@@ -26,7 +26,7 @@ function setup(){
     files:any[]=[];
     items={add:(file:File)=>this.files.push(file)};
   }
-  runInNewContext(code,{document,Event,File,Uint8Array,atob,DataTransfer:Transfer,crypto:{randomUUID:()=> 'save-op'},Date,setTimeout,clearTimeout,
+  runInNewContext(code,{document,Event,CustomEvent,File,Uint8Array,atob,DataTransfer:Transfer,crypto:{randomUUID:()=> 'save-op'},Date,setTimeout,clearTimeout,
     getComputedStyle:()=>({display:'block',visibility:'visible',opacity:'1'}),
     chrome:{runtime:{onMessage:{addListener:(value:any)=>{listener=value;}}}}});
   const send=(action:string,payload?:unknown)=>new Promise<any>(resolve=>listener({target:'xiaohongshu-bridge',action,payload},{},resolve));
@@ -45,6 +45,56 @@ afterEach(()=>{vi.clearAllTimers();vi.useRealTimers();});
 const savePayload={accountId:'account-a',title:'标题',body:'正文',imageCount:1};
 
 describe('小红书隔离世界驱动',()=>{
+  it('新版封闭 Shadow DOM 通过组件 save 事件保存，绝不触发 publish',async()=>{
+    const env=setup();env.acknowledge();env.selectors.set('button',[]);
+    const host=Object.assign(new EventTarget(),element(),{getAttribute:(key:string)=>key==='save-text'?'暂存离开':null});
+    const events:string[]=[];
+    host.addEventListener('save',event=>{
+      expect(event.bubbles).toBe(true);expect(event.composed).toBe(true);events.push('save');
+      env.respond({requestId:'save-op',ok:true,draftId:'image-draft',accountId:'account-a'});
+    });
+    host.addEventListener('publish',()=>events.push('publish'));
+    env.selectors.set('xhs-publish-btn',[host]);
+    await expect(env.send('SAVE_NOTE',savePayload)).resolves.toMatchObject({ok:true,draftId:'image-draft'});
+    expect(events).toEqual(['save']);expect(host.click).not.toHaveBeenCalled();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+  it.each([
+    ['save-disabled','true'],['save-disabled',''],['save-disabled','1'],
+    ['is-save-draft','false'],['save-text','暂存离开并发布']
+  ])('组件不可保存时不发送事件：%s=%s',async(key,value)=>{
+    const env=setup();env.acknowledge();env.selectors.set('button',[]);
+    const host=Object.assign(new EventTarget(),element(),{getAttribute:(name:string)=>name===key?value:null});
+    const saved=vi.fn(),published=vi.fn();host.addEventListener('save',saved);host.addEventListener('publish',published);
+    env.selectors.set('xhs-publish-btn',[host]);
+    const pending=env.send('SAVE_NOTE',savePayload);await vi.advanceTimersByTimeAsync(10001);
+    await expect(pending).resolves.toMatchObject({ok:false,message:expect.stringContaining('暂存离开')});
+    expect(saved).not.toHaveBeenCalled();expect(published).not.toHaveBeenCalled();expect(env.commands).toEqual([]);
+  });
+  it('组件异步解除禁用后再武装并保存，仍等待本次保存回执',async()=>{
+    const env=setup();env.acknowledge();env.selectors.set('button',[]);let disabled=true;
+    const host=Object.assign(new EventTarget(),element(),{getAttribute:(key:string)=>key==='save-disabled'?String(disabled):null});
+    const saved=vi.fn();host.addEventListener('save',saved);env.selectors.set('xhs-publish-btn',[host]);
+    const pending=env.send('SAVE_NOTE',savePayload);await vi.advanceTimersByTimeAsync(400);expect(saved).not.toHaveBeenCalled();
+    disabled=false;await vi.advanceTimersByTimeAsync(200);expect(saved).toHaveBeenCalledTimes(1);
+    env.respond({requestId:'save-op',ok:true,draftId:'ready',accountId:'account-a'});
+    await expect(pending).resolves.toMatchObject({ok:true,draftId:'ready'});
+  });
+  it('长文校验使用可见换行，代码中的 br 不会与下一行拼接',async()=>{
+    const env=setup();
+    const blocks=[{innerText:'def run():\n    return 1',textContent:'def run():    return 1'}];
+    const editor=Object.assign(element(),{querySelectorAll:(selector:string)=>selector==='p,h1,h2'?blocks:[]});
+    env.selectors.set('.rich-editor-content .tiptap.ProseMirror[contenteditable="true"]',[editor]);
+    env.selectors.set('textarea[placeholder="输入标题"]',[Object.assign(element(),{value:'测试长文'})]);
+    await expect(env.send('CHECK_ARTICLE',{title:'测试长文',body:'def run():\n    return 1',imageCount:0})).resolves.toEqual({ok:true});
+    await expect(env.send('CHECK_ARTICLE',{title:'测试长文',body:'缺少末尾',imageCount:0})).resolves.toMatchObject({ok:false});
+    expect(env.button.click).not.toHaveBeenCalled();
+  });
+
+  it('页面实际字数超限时阻断长文保存',async()=>{
+    const env=setup();env.selectors.set('.rich-editor-container .char-count.danger-text',[element('10001/10000')]);
+    await expect(env.send('CHECK_ARTICLE',{title:'标题',body:'正文',imageCount:0})).resolves.toMatchObject({ok:false,message:expect.stringContaining('字数限制')});
+  });
   it('观测器未确认武装时不点击按钮，并清理请求',async()=>{
     const env=setup();
     await expect(env.send('SAVE_NOTE',savePayload)).resolves.toMatchObject({ok:false,message:expect.stringContaining('未就绪')});

@@ -62,6 +62,31 @@ describe('小红书本地保存事务观测',()=>{
     expect(env.writes).toHaveBeenCalledTimes(1);
   });
 
+  it('长文只匹配 article-draft 的 richJson，纯文字不要求图片',()=>{
+    const env=setup();env.arm({...expected,format:'article',imageCount:0});
+    const store=new env.Store();store.name='article-draft';
+    store.put({draftId:'article-local',uid:'account-a',content:{articleStore:{articleTitle:'测试标题',richJson:{type:'doc',content:[{type:'paragraph',content:[{type:'text',text:'正文'}]},{type:'paragraph',content:[{type:'text',text:'第二行'}]}]}}}});
+    store.transaction.dispatchEvent(new Event('complete'));
+    expect(env.responses).toEqual([{requestId:'op-1',ok:true,draftId:'article-local',accountId:'account-a'}]);
+  });
+  it('长文的 blob 临时图片不能当成保存成功',()=>{
+    const env=setup();env.arm({...expected,format:'article',imageCount:1});
+    const store=new env.Store();store.name='article-draft';
+    store.put({draftId:'article-local',uid:'account-a',content:{articleStore:{articleTitle:'测试标题',richJson:{type:'doc',content:[{type:'paragraph',content:[{type:'text',text:'正文 第二行'}]},{type:'image',attrs:{imgs:[{src:'blob:pending'}]}}]}}}});
+    store.transaction.dispatchEvent(new Event('complete'));
+    expect(env.responses).toEqual([]);
+  });
+  it('两种格式的事务不能互相确认，即使标题和正文相同',()=>{
+    const env=setup();env.arm({...expected,format:'article'});
+    const imageStore=new env.Store();imageStore.put(record());imageStore.transaction.dispatchEvent(new Event('complete'));
+    expect(env.responses).toEqual([]);
+    env.arm({...expected,format:'image'});
+    const articleStore=new env.Store();articleStore.name='article-draft';
+    articleStore.put({draftId:'article-local',uid:'account-a',content:{articleStore:{articleTitle:'测试标题',richJson:{type:'doc',content:[{type:'paragraph',content:[{type:'text',text:'正文 第二行'}]},{type:'image',attrs:{imgs:[{src:'https://ros-preview.xhscdn.com/a'},{src:'https://ros-preview.xhscdn.com/b'}]}}]}}}});
+    articleStore.transaction.dispatchEvent(new Event('complete'));
+    expect(env.responses).toEqual([]);
+  });
+
   it('request 成功但事务回滚时返回失败',()=>{
     const env=setup();env.arm();const store=new env.Store();
     store.put(record()).dispatchEvent(new Event('success'));

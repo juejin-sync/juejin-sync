@@ -778,8 +778,10 @@ main {
 
 .task-bottom-row {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
+  gap: 8px;
   padding-top: 9px;
   border-top: 1px solid var(--border-divider);
   font-size: 11px;
@@ -789,9 +791,18 @@ main {
 .task-stats {
   color: var(--text-faint);
   display: flex;
+  flex-wrap: wrap;
+  min-width: 0;
   align-items: center;
   gap: 6px;
   font-size: 11px;
+}
+
+.task-stat {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
 }
 
 .task-stats strong,
@@ -808,8 +819,16 @@ main {
 
 .task-actions {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 6px;
+  max-width: 100%;
+  margin-left: auto;
+}
+
+.task-actions > button {
+  flex-shrink: 0;
+  white-space: nowrap;
 }
 
 .btn-action-primary {
@@ -915,11 +934,41 @@ main {
   color: var(--danger-text);
 }
 
-.platform-warning {
-  margin: 0;
+.task-notes {
+  min-width: 0;
+  border: 1px solid var(--border-divider);
+  border-radius: 7px;
+  background: var(--bg-subtle);
   font-size: 11px;
+  color: var(--text-muted);
+}
+
+.task-notes.has-warning {
   color: var(--warning-text);
 }
+
+.task-notes > summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 9px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.task-notes > summary::-webkit-details-marker { display: none; }
+.task-notes > summary:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; border-radius: 7px; }
+.task-notes-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.task-notes-toggle { flex-shrink: 0; color: var(--text-muted); }
+.task-notes-toggle::after { content: '⌄'; display: inline-block; margin-left: 4px; }
+.task-notes[open] .task-notes-toggle::after { transform: rotate(180deg); }
+.task-notes > ul {
+  margin: 0;
+  padding: 0 12px 9px 25px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+.task-notes li + li { margin-top: 5px; }
 
 .task-diagnostic {
   background: var(--danger-bg);

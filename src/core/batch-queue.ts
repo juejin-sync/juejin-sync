@@ -1,5 +1,5 @@
 // 防风控批量同步队列：提供有限并发、随机抖动延迟、暂停/继续与单篇失败隔离。
-import type {PlatformId} from '../types';
+import type {PlatformId,XiaohongshuFormat} from '../types';
 
 export type BatchTaskStatus='pending'|'syncing'|'saved'|'failed'|'skipped';
 
@@ -8,6 +8,7 @@ export interface BatchTaskItem{
   articleId:string;
   title:string;
   platform:PlatformId;
+  xiaohongshuFormat?:XiaohongshuFormat;
   status:BatchTaskStatus;
   draftUrl?:string;
   error?:string;
@@ -22,7 +23,7 @@ export interface BatchStats{
   state:'idle'|'running'|'paused'|'stopped'|'completed';
 }
 
-export type TaskWorker=(item:BatchTaskItem)=>Promise<{ok:boolean;draftUrl?:string;error?:string}>;
+export type TaskWorker=(item:BatchTaskItem)=>Promise<{ok:boolean;draftUrl?:string;error?:string;skipped?:boolean}>;
 
 export interface BatchQueueOptions{
   concurrency?:number;
@@ -173,6 +174,8 @@ export class BatchSyncQueue{
             item.status='saved';
             item.draftUrl=result.draftUrl;
             item.error=undefined;
+          }else if(result.skipped){
+            item.status='skipped';item.error=undefined;
           }else{
             item.status='failed';
             item.error=result.error||'同步失败';
@@ -242,6 +245,8 @@ export class BatchSyncQueue{
             item.status='saved';
             item.draftUrl=result.draftUrl;
             item.error=undefined;
+          }else if(result.skipped){
+            item.status='skipped';item.error=undefined;
           }else{
             item.status='failed';
             item.error=result.error||'同步失败';
