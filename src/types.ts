@@ -2,9 +2,21 @@
 export type PlatformId='csdn'|'wechat'|'cnblogs'|'zhihu'|'xiaohongshu';
 export type XiaohongshuFormat='article'|'image';
 export type XiaohongshuMode=XiaohongshuFormat|'both';
-// 图文预览保存可编辑配方；不持久化图卡二进制，执行时在本地重新渲染。
-export type XiaohongshuCard={heading:string;body:string};
-export type XiaohongshuImageContent={title:string;body:string;cards:XiaohongshuCard[];selectedImageKeys:string[]};
+export type XiaohongshuCardKind='cover'|'point'|'summary';
+// 图卡配方：独立封面、各章节观点与可选小结；支持有序图卡与章节原图混排。
+export type XiaohongshuCard={heading:string;body:string;kind?:XiaohongshuCardKind;sectionIndex?:number};
+export type XiaohongshuPage=
+  | {type:'card';kind:XiaohongshuCardKind;heading:string;body:string;sectionIndex?:number}
+  | {type:'image';src:string;imageKey:string;sectionIndex?:number;caption?:string};
+export type XiaohongshuImageContent={
+  version?:number;
+  title:string;
+  body:string;
+  pages:XiaohongshuPage[];
+  originalImagesCount:number;
+  cards:XiaohongshuCard[];
+  selectedImageKeys:string[];
+};
 export type Article={id:string;sourceDraftId?:string;title:string;markdown:string;summary?:string;cover?:string;tags:string[];sourceUrl:string};
 export type TaskStatus='queued'|'checking-login'|'transforming'|'writing'|'saved'|'failed'|'needs-user'|'needs-confirmation';
 export type TaskProgress={current:number;total:number;message:string};
@@ -23,5 +35,5 @@ export type PlatformState={id:PlatformId;name:string;loggedIn:'unknown'|'yes'|'n
 export type CategoryMapping={sourceTag:string;targetCategory:string};
 export type ImageFailurePolicy='continue'|'abort';
 export type WechatCodeTheme='onedark'|'github-light'|'monokai';
-export type ExtensionSettings={xiaohongshuMode:XiaohongshuMode;defaultCsdnCategory:string;categoryMappings:CategoryMapping[];syncCover:boolean;autoSummary:boolean;appendSourceLink:boolean;imageFailurePolicy:ImageFailurePolicy;confirmDraftUpdate:boolean;wechatCodeTheme:WechatCodeTheme};
+export type ExtensionSettings={xiaohongshuMode:XiaohongshuMode;xiaohongshuSyncOriginalImages:boolean;defaultCsdnCategory:string;categoryMappings:CategoryMapping[];syncCover:boolean;autoSummary:boolean;appendSourceLink:boolean;imageFailurePolicy:ImageFailurePolicy;confirmDraftUpdate:boolean;wechatCodeTheme:WechatCodeTheme};
 export const uid=()=>crypto.randomUUID();

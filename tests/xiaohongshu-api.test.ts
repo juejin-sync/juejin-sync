@@ -79,6 +79,23 @@ describe('本地图文草稿保存',()=>{
     await expect(save({}, {...article,cover:'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw=='})).rejects.toMatchObject({category:'content',stage:'images'});
     expect(actions).not.toContain('UPLOAD_IMAGE');expect(remove).toHaveBeenCalledWith(9);
   });
+  it('支持新版 ordered pages 独立图卡与章节原图混排，记录正文配图数',async()=>{
+    const imageContent={
+      version:2,
+      title:article.title,
+      body:'已确认的精简正文',
+      pages:[
+        {type:'image' as const,src:PIXEL,imageKey:imageKey(PIXEL),caption:'步骤 配图'}
+      ],
+      originalImagesCount:1,
+      cards:[],
+      selectedImageKeys:[imageKey(PIXEL)]
+    };
+    const result=await save({imageContent});
+    expect(actions).toEqual(['PING','GET_SESSION','PREPARE_IMAGE_NOTE','UPLOAD_IMAGE','WAIT_EDITOR','FILL_TEXT','GET_SESSION','SAVE_NOTE']);
+    expect(result.stats).toMatchObject({imageTotal:1,imageSucceeded:1,imageFailed:0});
+    expect(result.warnings.join('')).toContain('附带 1 张正文配图');
+  });
 });
 describe('小红书账号检测',()=>{
   it('真实用户信息字段返回账号与昵称',async()=>{

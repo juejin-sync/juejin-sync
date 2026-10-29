@@ -1,5 +1,5 @@
 // 小红书长文与精简图文适配器：页面驱动式草稿写入，复用浏览器登录态，全链路不点击发布。
-import type {Article,TaskProgress,XiaohongshuFormat,XiaohongshuImageContent} from '../types';
+import type {Article,TaskProgress,XiaohongshuFormat,XiaohongshuImageContent,XiaohongshuPage} from '../types';
 import type {AdapterResult} from './adapter';
 import {SyncError} from '../core/diagnostic';
 import {renderAllMermaidBlocks} from '../core/mermaid-render';
@@ -147,16 +147,40 @@ export async function saveXiaohongshuDraft(article:Article,options:XiaohongshuSa
       note={title:content.title,body:content.text,images:content.images,warnings:content.warnings};
     }else{
       if(!options.imageContent)throw new SyncError('旧精简图文任务缺少内容配方，请从掘金重新发起同步','blocked','content');
-      validateXiaohongshuImageContent(options.imageContent);
-      const candidates=xhsImageCandidates(article,mermaidImages);
-      const selected=options.imageContent.selectedImageKeys.map(key=>{
-        const src=candidates.find(src=>imageKey(src)===key);
-        if(!src)throw new SyncError('原文配图已变化，请从掘金重新发起同步','blocked','images');
-        return src;
-      });
-      const cards=await renderXiaohongshuCards(options.imageContent.cards);
-      if(cards.length+selected.length>18)throw new SyncError('图卡分页与配图合计超过18张，请精简原文配图或选择仅长文','content','images');
-      note={title:options.imageContent.title,body:options.imageContent.body,images:[...cards,...selected],warnings:['精简内容由本地规则抽取，请在平台草稿箱核对内容与排版']};
+      const imageContent=options.imageContent;
+      validateXiaohongshuImageContent(imageContent);
+      let finalImages:string[]=[];
+      let originalCount=0;
+      if(Array.isArray(imageContent.pages)&&imageContent.pages.length){
+        const candidates=xhsImageCandidates(article,mermaidImages);
+        const cardPages=imageContent.pages.filter((p):p is Extract<XiaohongshuPage,{type:'card'}>=>p.type==='card');
+        const renderedCards=await renderXiaohongshuCards(cardPages.map(p=>({heading:p.heading,body:p.body,kind:p.kind,sectionIndex:p.sectionIndex})));
+        let cardIdx=0;
+        for(const page of imageContent.pages){
+          if(page.type==='card'){
+            finalImages.push(renderedCards[cardIdx++]);
+          }else if(page.type==='image'){
+            const src=page.src||candidates.find(s=>imageKey(s)===page.imageKey);
+            if(!src)throw new SyncError('原文配图已变化，请从掘金重新发起同步','blocked','images');
+            finalImages.push(src);
+            originalCount++;
+          }
+        }
+      }else{
+        const candidates=xhsImageCandidates(article,mermaidImages);
+        const selected=(imageContent.selectedImageKeys||[]).map(key=>{
+          const src=candidates.find(src=>imageKey(src)===key);
+          if(!src)throw new SyncError('原文配图已变化，请从掘金重新发起同步','blocked','images');
+          return src;
+        });
+        const cards=await renderXiaohongshuCards(imageContent.cards||[]);
+        finalImages=[...cards,...selected];
+        originalCount=selected.length;
+      }
+      if(finalImages.length>18)throw new SyncError('图卡分页与配图合计超过18张，请精简原文配图或选择仅长文','content','images');
+      const noteWarnings=['精简内容由本地规则抽取，请在平台草稿箱核对内容与排版'];
+      if(originalCount>0)noteWarnings.push(`图卡已生成并附带 ${originalCount} 张正文配图`);
+      note={title:imageContent.title,body:imageContent.body,images:finalImages,warnings:noteWarnings};
     }
   }catch(error){
     if(error instanceof SyncError)throw error;
