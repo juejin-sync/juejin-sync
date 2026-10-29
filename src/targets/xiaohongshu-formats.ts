@@ -135,6 +135,73 @@ export function compileXiaohongshuArticle(article:Article,options:{mermaidImages
 }
 
 /** 按完整文章的章节抽取句子；结果供用户在平台草稿箱核对，不作为自动理解或 AI 改写。 */
+const ACTION_VERBS=[
+  '搭建','实现','构建','打造','开发','设计','编写','优化',
+  '重构','解析','探索','玩转','搞定','实战','入门','指南',
+  '上手','部署','配置','接入','集成','迁移','落地','实践'
+];
+
+export function extractXiaohongshuShortTitle(rawTitle:string):string{
+  const stripped=stripInlineMarkdown(rawTitle).trim();
+  if(stripped.length<=20)return stripped;
+
+  // 1. 强标点拆分（冒号、竖线、破折号、双连字符等，不包含普通中英文内空格）
+  const strongParts=stripped
+    .split(/[：:｜|—]+|\s+[-–—]+\s+/)
+    .map(s=>s.trim().replace(/^[【\[（(]+|[】\]）)]+$/g,'').trim())
+    .filter(Boolean);
+  if(strongParts.length>1){
+    const candidates=strongParts.filter(s=>s.length>=4&&s.length<=20);
+    if(candidates.length>0){
+      return [...candidates].sort((a,b)=>b.length-a.length)[0];
+    }
+  }
+
+  // 2. 弱标点拆分（逗号、句号、感叹号、问号、分号）
+  const weakParts=stripped
+    .split(/[，,。！？!?；;]+/)
+    .map(s=>s.trim().replace(/^[【\[（(]+|[】\]）)]+$/g,'').trim())
+    .filter(Boolean);
+  if(weakParts.length>1){
+    const candidates=weakParts.filter(s=>s.length>=4&&s.length<=20);
+    if(candidates.length>0){
+      return [...candidates].sort((a,b)=>b.length-a.length)[0];
+    }
+  }
+
+  // 3. 中文句式分析：针对类似“用 Gitee Go 搭建WorkBuddy云端定时任务”的介词引导 + 动宾核心
+  const introMatch=stripped.match(/^(?:用|基于|使用|通过|借助|利用|从)\s+/);
+  if(introMatch){
+    for(const verb of ACTION_VERBS){
+      const verbIdx=stripped.indexOf(verb,introMatch[0].length);
+      if(verbIdx!==-1){
+        const actionClause=stripped.slice(verbIdx).trim();
+        if(actionClause.length>=4&&actionClause.length<=20){
+          return actionClause;
+        }
+      }
+    }
+    const withoutIntro=stripped.slice(introMatch[0].length).trim();
+    if(withoutIntro.length>=4&&withoutIntro.length<=20){
+      return withoutIntro;
+    }
+  }
+
+  // 4. 无引导词但在中间包含核心技术动词的切分尝试
+  for(const verb of ACTION_VERBS){
+    const verbIdx=stripped.indexOf(verb);
+    if(verbIdx>0){
+      const actionClause=stripped.slice(verbIdx).trim();
+      if(actionClause.length>=4&&actionClause.length<=20){
+        return actionClause;
+      }
+    }
+  }
+
+  // 5. 无法安全提炼出完整短标题时保留原长标题，由 validateXiaohongshuImageContent 明确报错
+  return stripped;
+}
+
 export function buildXiaohongshuImageContent(article:Article,options:{syncCover?:boolean;appendSourceLink?:boolean;syncOriginalImages?:boolean;mermaidImages?:Map<string,string>}={}):XiaohongshuImageContent{
   const tokens=new Marked({gfm:true}).lexer(normalizeMarkdown(article.markdown));
   type RawSection={heading:string;text:string[];images:string[];isSummary:boolean};
@@ -229,8 +296,7 @@ export function buildXiaohongshuImageContent(article:Article,options:{syncCover?
   }
   while(xhsImageLength(`${bodyText}\n\n${tail}`)>1000&&bodyText.includes('\n\n'))bodyText=bodyText.slice(0,bodyText.lastIndexOf('\n\n'));
 
-  const rawTitle=stripInlineMarkdown(article.title);
-  const title=rawTitle.length<=20?rawTitle:(rawTitle.split(/[：:｜|，,。！？\s-]/).find(s=>s.trim().length>0&&s.trim().length<=20)?.trim()||rawTitle);
+  const title=extractXiaohongshuShortTitle(article.title);
 
   const cards:XiaohongshuCard[]=pages.filter((p):p is Extract<XiaohongshuPage,{type:'card'}>=>p.type==='card').map(p=>({heading:p.heading,body:p.body,kind:p.kind,sectionIndex:p.sectionIndex}));
   const selectedImageKeys=pages.filter((p):p is Extract<XiaohongshuPage,{type:'image'}>=>p.type==='image').map(p=>p.imageKey);
@@ -247,7 +313,7 @@ export function buildXiaohongshuImageContent(article:Article,options:{syncCover?
 }
 
 export function validateXiaohongshuImageContent(content:XiaohongshuImageContent){
-  if(!content||typeof content.title!=='string'||!content.title.trim()||content.title.length>20)throw new SyncError('精简图文标题需为 1～20 个字符，请调整原文标题或在偏好设置中选择其他格式','content','validation');
+  if(!content||typeof content.title!=='string'||content.title.trim().length<2||content.title.length>20)throw new SyncError('精简图文标题需在 2～20 个字符以内，请调整原文标题或在偏好设置中选择其他格式','content','validation');
   if(typeof content.body!=='string'||!content.body.trim()||xhsImageLength(content.body)>1000)throw new SyncError('精简图文正文需为 1～1000 字，请调整原文标题或在偏好设置中选择其他格式','content','validation');
   const cards=Array.isArray(content.cards)?content.cards:(Array.isArray(content.pages)?content.pages.filter(p=>p.type==='card'):[]);
   const images=Array.isArray(content.selectedImageKeys)?content.selectedImageKeys:(Array.isArray(content.pages)?content.pages.filter(p=>p.type==='image'):[]);
