@@ -15,8 +15,10 @@ import {checkWechatAuth,requireWechatAccount,saveWechatDraft} from './targets/we
 import {checkCnblogsAuth,fetchCnblogsPostState,saveCnblogsDraft} from './targets/cnblogs-api';
 import {checkZhihuAuth,fetchZhihuDraftState,saveZhihuDraft} from './targets/zhihu-api';
 import {checkXiaohongshuAuth,saveXiaohongshuDraft} from './targets/xiaohongshu-api';
-import type {Article,ExtensionSettings,PlatformId,SyncTask,TaskStage} from './types';
+import type {Article,ExtensionSettings,PlatformId,SyncTask,TaskStage,XiaohongshuFormat,XiaohongshuImageContent} from './types';
 import {uid} from './types';
+import {buildXiaohongshuImageContent} from './targets/xiaohongshu-formats';
+import {renderAllMermaidBlocks} from './core/mermaid-render';
 
 const runningTasks=new Set<string>();
 /** 全局任务闸门：同一时间最多 2 篇文章在同步，批量重试自动排队，避免触发平台限流。 */
@@ -207,6 +209,8 @@ async function runTask(task:SyncTask){
           }
         }):task.platform==='xiaohongshu'?await saveXiaohongshuDraft(transformed,{
           ...callbacks,
+          format:task.xiaohongshuFormat||'image',
+          imageContent:task.xiaohongshuImageContent,
           expectedAccountId:task.xiaohongshuAccountId,
           appendSourceLink:settings.appendSourceLink,
           syncCover:settings.syncCover
@@ -278,7 +282,8 @@ async function execute(task:SyncTask){
   }finally{runningTasks.delete(task.id);}
 }
 
-async function create(article:Article,platform:PlatformId='csdn',expectedAccountId?:string){
+async function create(article:Article,platform:PlatformId='csdn',expectedAccountId?:string,format:XiaohongshuFormat='article',imageContent?:XiaohongshuImageContent){
+  if(platform==='xiaohongshu'&&!['article','image'].includes(format))throw new SyncError('无效的小红书格式','content','validation');
   if(!isValidPlatform(platform))throw new SyncError(`不支持的目标平台: ${platform}`,'content','validation');
   const wechatAccountId=platform==='wechat'?await requireWechatAccount(expectedAccountId):undefined;
   const cnblogsAuth=platform==='cnblogs'?await checkCnblogsAuth():undefined;
@@ -307,7 +312,7 @@ async function create(article:Article,platform:PlatformId='csdn',expectedAccount
 
   const tasks=await allTasks();
   const currentAccountId=platform==='cnblogs'?cnblogsAccountId:platform==='wechat'?wechatAccountId:platform==='zhihu'?zhihuAccountId:platform==='xiaohongshu'?xiaohongshuAccountId:undefined;
-  const previous=findMatchingTask(tasks,article,platform,currentAccountId);
+  const previous=findMatchingTask(tasks,article,platform,currentAccountId,format);
   if(previous?.diagnostic?.category==='interrupted')throw new SyncError('上次写入结果尚未确认，请先检查目标草稿箱，再在同步记录中确认重试','interrupted','draft');
   if(platform==='wechat'&&(findMatchingTask(tasks,article,'wechat')?.wechatAppMsgId||await getArticleDraftMapping(article,'wechat'))){
     throw new SyncError('发现未绑定账号的旧微信草稿映射，已阻止自动覆盖，请先核对旧草稿归属','blocked','authentication');
@@ -327,6 +332,7 @@ async function create(article:Article,platform:PlatformId='csdn',expectedAccount
   const task:SyncTask=previous
     ?{...previous,article,status:needsConfirmation?'needs-confirmation':'queued',updatedAt:now,csdnArticleId,wechatAppMsgId,cnblogsPostId,zhihuArticleId,xiaohongshuDraftId:undefined,draftUrl,zhihuAccountId,cnblogsAccountId,xiaohongshuAccountId,error:undefined,diagnostic:undefined,warnings:undefined,stats:undefined,progress:undefined}
     :{id:uid(),article,platform,wechatAccountId,cnblogsAccountId,zhihuAccountId,xiaohongshuAccountId,status:needsConfirmation?'needs-confirmation':'queued',createdAt:now,updatedAt:now,attempts:0,csdnArticleId,wechatAppMsgId,cnblogsPostId,zhihuArticleId,draftUrl};
+  if(platform==='xiaohongshu'){task.xiaohongshuFormat=format;task.xiaohongshuImageContent=format==='image'?imageContent:undefined;}
   await putTask(task);
   if(needsConfirmation)return task;
   await execute(task);
@@ -350,14 +356,15 @@ async function recoverInterruptedTasks(){
 /** 启动序：先完成 storage 瘦身迁移，再恢复中断任务（恢复的任务经双路径回填正文）。 */
 const recovery=migrateStoredTasks().then(()=>recoverInterruptedTasks());
 
-type PendingHistory={articleId:string;title:string;sourceUrl:string;uuid:string;platform:PlatformId;wechatAccountId?:string;zhihuAccountId?:string;xiaohongshuAccountId?:string;expiresAt:number};
+type PendingHistory={articleId:string;title:string;sourceUrl:string;uuid:string;platform:PlatformId;wechatAccountId?:string;zhihuAccountId?:string;xiaohongshuAccountId?:string;xiaohongshuFormat?:XiaohongshuFormat;xiaohongshuImageContent?:XiaohongshuImageContent;expiresAt:number};
 /** 登录续传队列只在后台串行读改写，避免两个平台同时要求登录时相互覆盖。 */
 const pendingHistoryGate=new Semaphore(1);
-const pendingHistoryKey=(request:PendingHistory)=>`${request.platform}:${request.wechatAccountId||request.zhihuAccountId||request.xiaohongshuAccountId||''}:${request.articleId}`;
+const pendingHistoryKey=(request:PendingHistory)=>`${request.platform}:${request.wechatAccountId||request.zhihuAccountId||request.xiaohongshuAccountId||''}:${request.platform==='xiaohongshu'?(request.xiaohongshuFormat||'image')+':':''}${request.articleId}`;
 async function readPendingHistories(){
   const data=await chrome.storage.session.get(['pendingHistories','pendingHistory']) as {pendingHistories?:PendingHistory[];pendingHistory?:PendingHistory};
   const requests=Array.isArray(data.pendingHistories)?data.pendingHistories:[];
   if(data.pendingHistory&&!requests.some(item=>pendingHistoryKey(item)===pendingHistoryKey(data.pendingHistory!)))requests.push(data.pendingHistory);
+  for(const request of requests)if(request.platform==='xiaohongshu'&&!request.xiaohongshuFormat)request.xiaohongshuFormat='image';
   return requests.filter(item=>item.expiresAt>Date.now());
 }
 async function savePendingHistories(requests:PendingHistory[]){
@@ -392,7 +399,7 @@ async function syncHistory(request:Omit<PendingHistory,'expiresAt'>){
     return{ok:false,needsLogin:true,message:`请先登录${name}，返回掘金后将继续同步`};
   }
   const article=await fetchJuejinDraftByArticleId(request.articleId,request.uuid,request.title);
-  return{ok:true,articleId:request.articleId,platform:request.platform,task:await create(article,request.platform,request.wechatAccountId||request.zhihuAccountId||request.xiaohongshuAccountId)};
+  return{ok:true,articleId:request.articleId,platform:request.platform,task:await create(article,request.platform,request.wechatAccountId||request.zhihuAccountId||request.xiaohongshuAccountId,request.xiaohongshuFormat,request.xiaohongshuImageContent)};
 }
 
 async function resumePendingHistory(){
@@ -409,13 +416,13 @@ async function resumePendingHistory(){
       try{
         article=await fetchJuejinDraftByArticleId(request.articleId,request.uuid,request.title);
         const targetAccountId=request.platform==='cnblogs'&&'accountId' in auth?auth.accountId:request.platform==='zhihu'?request.zhihuAccountId:request.platform==='xiaohongshu'?request.xiaohongshuAccountId:request.wechatAccountId;
-        const task=await create(article,request.platform,targetAccountId);
+        const task=await create(article,request.platform,targetAccountId,request.xiaohongshuFormat,request.xiaohongshuImageContent);
         results.push({articleId:request.articleId,platform:request.platform,task});
       }catch(error){
         errors.push({articleId:request.articleId,platform:request.platform,message:(error as Error).message||'恢复同步失败'});
         // 任务已落盘（即使目标平台写入失败）时，交由任务记录处理，避免登录续传再次自动执行。
         const accountId=request.platform==='cnblogs'&&'accountId' in auth?auth.accountId:request.platform==='zhihu'?request.zhihuAccountId:request.platform==='xiaohongshu'?request.xiaohongshuAccountId:request.wechatAccountId;
-        if(!article||!findMatchingTask(await allTasks(),article,request.platform,accountId))continue;
+        if(!article||!findMatchingTask(await allTasks(),article,request.platform,accountId,request.xiaohongshuFormat))continue;
       }
       requests=requests.filter(item=>pendingHistoryKey(item)!==pendingHistoryKey(request));
       await savePendingHistories(requests);
@@ -442,14 +449,23 @@ chrome.runtime.onMessage.addListener((message,sender,reply)=>{
   if(!isSupportedMessage(message))return;
   (async()=>{
     await recovery;
-    if(message.type==='SYNC_NEW_ARTICLE'){
+    if(message.type==='PREPARE_XIAOHONGSHU_CONTENT'){
+      const format=message.xiaohongshuFormat;
+      if(format!=='article'&&format!=='image')throw new Error('无效的小红书格式');
+      const article=message.article?await ensureArticleContent(message.article as Article):await fetchJuejinDraftByArticleId(String(message.articleId),String(message.uuid||''),String(message.title||''));
+      const settings=await getSettings();
+      const mermaidImages=format==='image'?await renderAllMermaidBlocks(article.markdown):undefined;
+      const imageContent=format==='image'?buildXiaohongshuImageContent(article,{mermaidImages,syncCover:settings.syncCover,appendSourceLink:settings.appendSourceLink}):undefined;
+      // 内容校验由已落盘的具体格式任务执行，失败也保留独立的任务记录。
+      reply({ok:true,article,imageContent});
+    }else if(message.type==='SYNC_NEW_ARTICLE'){
       if(!isValidPlatform(message.platform)){
         reply({ok:false,message:`不支持的目标平台: ${message.platform}`});
         return;
       }
       const platform:PlatformId=message.platform;
       const expectedAccountId=typeof message.accountId==='string'?message.accountId:typeof message.wechatAccountId==='string'?message.wechatAccountId:typeof message.zhihuAccountId==='string'?message.zhihuAccountId:typeof message.xiaohongshuAccountId==='string'?message.xiaohongshuAccountId:undefined;
-      reply({ok:true,task:await create(message.article as Article,platform,expectedAccountId)});
+      reply({ok:true,task:await create(message.article as Article,platform,expectedAccountId,message.xiaohongshuFormat as XiaohongshuFormat|undefined,message.xiaohongshuImageContent as XiaohongshuImageContent|undefined)});
     }else if(message.type==='CHECK_CSDN_STATUS'){
       reply(await checkCsdnAuth());
     }else if(message.type==='OPEN_CSDN_LOGIN'){
@@ -483,7 +499,7 @@ chrome.runtime.onMessage.addListener((message,sender,reply)=>{
       }
       const platform:PlatformId=message.platform;
       const expectedAccountId=typeof message.accountId==='string'?message.accountId:typeof message.wechatAccountId==='string'?message.wechatAccountId:typeof message.zhihuAccountId==='string'?message.zhihuAccountId:typeof message.xiaohongshuAccountId==='string'?message.xiaohongshuAccountId:undefined;
-      reply(await syncHistory({articleId:String(message.articleId),title:String(message.title||''),sourceUrl:String(message.sourceUrl||''),uuid:String(message.uuid||''),platform,wechatAccountId:expectedAccountId,zhihuAccountId:expectedAccountId,xiaohongshuAccountId:expectedAccountId}));
+      reply(await syncHistory({articleId:String(message.articleId),title:String(message.title||''),sourceUrl:String(message.sourceUrl||''),uuid:String(message.uuid||''),platform,wechatAccountId:expectedAccountId,zhihuAccountId:expectedAccountId,xiaohongshuAccountId:expectedAccountId,xiaohongshuFormat:(message.xiaohongshuFormat||'article') as XiaohongshuFormat,xiaohongshuImageContent:message.xiaohongshuImageContent as XiaohongshuImageContent|undefined}));
     }else if(message.type==='RESUME_PENDING_HISTORY'){
       reply(await resumePendingHistory());
     }else if(message.type==='GET_TASKS'){

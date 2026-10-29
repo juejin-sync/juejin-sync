@@ -21,7 +21,8 @@ export function toStorageTask(task:SyncTask):SyncTask{
 /** 升级迁移：清理历史记录中已存在的全量 Markdown 正文。 */
 export async function migrateStoredTasks():Promise<boolean>{
   const raw=((await chrome.storage.local.get(KEY))[KEY]||[]) as SyncTask[];
-  if(!raw.some(task=>task.article?.markdown))return false;
+  if(!raw.some(task=>task.article?.markdown||task.platform==='xiaohongshu'&&!task.xiaohongshuFormat))return false;
+  for(const task of raw)if(task.platform==='xiaohongshu'&&!task.xiaohongshuFormat)task.xiaohongshuFormat='image';
   await saveTasks(raw);
   return true;
 }
@@ -33,7 +34,7 @@ export function uniqueTasks(tasks:SyncTask[]){
     .sort((a,b)=>Date.parse(b.updatedAt)-Date.parse(a.updatedAt))
     .filter(task=>{
       const accountId=taskAccountId(task);
-      const identity=`${task.platform}:${accountId||'legacy'}:${task.article.id}`;
+      const identity=`${task.platform}:${accountId||'legacy'}:${task.platform==='xiaohongshu'?(task.xiaohongshuFormat||'image')+':':''}${task.article.id}`;
       if(identities.has(identity))return false;
       identities.add(identity);
       return true;

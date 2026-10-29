@@ -187,8 +187,21 @@ function formatDuration(durationMs:number){
   return`${Math.floor(durationMs/60000)}m ${Math.round(durationMs%60000/1000)}s`;
 }
 
+/** 小红书预期的排版降级与本地保存说明属于提示；未知告警仍保持警告状态。 */
+const xiaohongshuNotices=new Set([
+  '行内强调、代码和链接按可读文本保留',
+  '长文编辑器不支持原生代码块，保留的代码逐行转为文本',
+  '长文编辑器不支持原生表格，保留的表格按表头转为字段列表',
+  '勾选列表已转为保留勾选状态的普通列表',
+  '草稿仅保存在当前浏览器本地；清除浏览器数据会删除草稿，重复同步会新建草稿。',
+  '精简内容由本地规则抽取，请在平台草稿箱核对内容与排版'
+]);
+function hasTaskWarnings(task:SyncTask){
+  return task.warnings?.some(text=>task.platform!=='xiaohongshu'||!(xiaohongshuNotices.has(text)||/^已按本地规则精简：正文 \d+ → \d+ 字，配图占用 \d+ 字；/.test(text)))||false;
+}
+
 function statusKind(task:SyncTask){
-  if(task.status==='saved')return task.warnings?.length?'warning':'success';
+  if(task.status==='saved')return hasTaskWarnings(task)?'warning':'success';
   if(task.status==='failed'||task.status==='needs-user')return'failure';
   if(task.status==='needs-confirmation')return'warning';
   return'working';
@@ -199,8 +212,8 @@ function taskCard(task:SyncTask){
   let stateText=labels[task.status]||'同步中';
   let stateIcon='⛵';
   if(task.status==='saved'){
-    stateText=task.warnings?.length?'已保存，有警告':(task.draftUrl?'已抵达草稿箱':'同步成功');
-    stateIcon=task.warnings?.length?'⚠':'✓';
+    stateText=hasTaskWarnings(task)?'已保存，有警告':(task.draftUrl?'已保存至草稿箱':'同步成功');
+    stateIcon=hasTaskWarnings(task)?'⚠':'✓';
   }else if(task.status==='failed'){
     stateText='同步失败';
     stateIcon='✕';
@@ -213,7 +226,7 @@ function taskCard(task:SyncTask){
   }
   const cover=task.article.cover?`<img src="${escapeHtml(task.article.cover)}" alt="">`:'';
   const actions=[];
-  if(task.draftUrl)actions.push(`<button class="history-action btn-action-primary" data-open="${escapeHtml(task.draftUrl)}" title="${task.platform==='xiaohongshu'?'在发布页点击草稿箱查看当前浏览器保存的草稿':'打开草稿'}">${task.platform==='xiaohongshu'?'本地草稿入口 ↗':'草稿 ↗'}</button>`);
+  if(task.draftUrl)actions.push(`<button class="history-action btn-action-primary" data-open="${escapeHtml(task.draftUrl)}" title="${task.platform==='xiaohongshu'?'在发布页点击草稿箱查看当前浏览器保存的草稿':'打开草稿'}">查看草稿 ↗</button>`);
   if(task.platform==='csdn'&&!['queued','checking-login','transforming','writing'].includes(task.status))actions.push(`<button class="history-action btn-action-dryrun" data-dryrun="${escapeHtml(task.id)}" title="同步预演：查看分类命中、图片转存与内容风险，不写入 CSDN">预演</button>`);
   if(task.status==='needs-confirmation')actions.push(`<button class="history-action confirm btn-action-confirm" data-confirm="${escapeHtml(task.id)}">确认更新</button>`);
   if(['failed','needs-user'].includes(task.status))actions.push(`<button class="history-action retry btn-action-retry" data-retry="${escapeHtml(task.id)}">重试</button>`);
@@ -223,8 +236,10 @@ function taskCard(task:SyncTask){
   const error=task.error?`<p class="platform-error" title="${escapeHtml(task.error)}">${escapeHtml(task.error)}</p>`:'';
   const diagText=task.diagnostic?`${task.article.title} [${task.diagnostic.category} - ${task.diagnostic.stage}]: ${task.diagnostic.message} (${task.diagnostic.suggestion})`:'';
   const diagnostic=task.diagnostic?`<div class="task-diagnostic"><div class="diagnostic-header"><b>${categoryLabels[task.diagnostic.category]} · ${stageLabels[task.diagnostic.stage]}</b><button class="btn-copy-diag" data-copy-diag="${escapeHtml(diagText)}">复制诊断</button></div><span>${escapeHtml(task.diagnostic.suggestion)}</span></div>`:'';
-  const warning=task.warnings?.length?`<p class="platform-warning" title="${escapeHtml(task.warnings.join('\n'))}">${escapeHtml(task.warnings.join('；'))}</p>`:'';
-  const stats=task.stats?`耗时 <b>${formatDuration(task.stats.durationMs)}</b><i>·</i>图片 <b>${task.stats.imageSucceeded}/${task.stats.imageTotal}</b>${task.stats.imageFailed?`<i>·</i><strong>${task.stats.imageFailed}</strong> 失败`:''}`:'';
+  const compacted=task.platform==='xiaohongshu'?task.warnings?.find(text=>text.startsWith('已按本地规则精简：'))?.match(/→\s*(\d+)\s*字/):undefined;
+  const notesLabel=hasTaskWarnings(task)?'有同步警告，请查看详情':compacted?`已按规则精简 · ${compacted[1]} 字，请核对`:`${task.warnings?.length||0} 条同步说明`;
+  const warning=task.warnings?.length?`<details class="task-notes${hasTaskWarnings(task)?' has-warning':''}" data-task-notes="${escapeHtml(task.id)}"><summary><span class="task-notes-label">${escapeHtml(notesLabel)}</span><span class="task-notes-toggle">详情</span></summary><ul>${task.warnings.map(text=>`<li>${escapeHtml(text)}</li>`).join('')}</ul></details>`:'';
+  const stats=task.stats?`<span class="task-stat">耗时 <b>${formatDuration(task.stats.durationMs)}</b></span>${task.stats.imageTotal?`<span class="task-stat">图片 <b>${task.stats.imageSucceeded}/${task.stats.imageTotal}</b></span>`:''}${task.stats.imageFailed?`<span class="task-stat"><strong>${task.stats.imageFailed}</strong> 张失败</span>`:''}`:'';
   const progressPercent=task.progress?.total?Math.min(100,Math.max(0,Math.round(task.progress.current/task.progress.total*100))):0;
   const progress=task.progress?`<div class="task-progress-box">
     <div class="progress-info">
@@ -233,8 +248,8 @@ function taskCard(task:SyncTask){
     </div>
     <div class="task-progress ${task.progress.total?'':'indeterminate'}"><span style="width:${task.progress.total?progressPercent:35}%"></span></div>
   </div>`:'';
-  const platformName=platformLabel(task.platform);
-  const bottomStats=stats?`<span>${platformName}</span><i>·</i>${stats}`:`<span>${platformName}草稿同步</span>`;
+  const platformName=platformLabel(task.platform)+(task.platform==='xiaohongshu'?` · ${task.xiaohongshuFormat==='article'?'长文':'精简图文'}`:'');
+  const bottomStats=stats||'';
   return`<div class="history-card ${kind}">
     <div class="task-main-row">
       <span class="history-cover">${cover}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg></span>
@@ -333,7 +348,9 @@ async function loadTasks(){
       $('#btn-goto-juejin')?.addEventListener('click',()=>void chrome.tabs.create({url:'https://juejin.cn/creator/content/article/essays?status=all',active:true}));
       return;
     }
+    const expandedNotes=new Set([...list.querySelectorAll<HTMLDetailsElement>('details[data-task-notes][open]')].map(item=>item.dataset.taskNotes));
     list.innerHTML=tasks.map(taskCard).join('');
+    list.querySelectorAll<HTMLDetailsElement>('details[data-task-notes]').forEach(item=>{item.open=expandedNotes.has(item.dataset.taskNotes);});
     list.querySelectorAll<HTMLImageElement>('.history-cover img').forEach(image=>image.addEventListener('error',()=>image.remove()));
     list.querySelectorAll<HTMLButtonElement>('[data-open]').forEach(button=>button.addEventListener('click',()=>void chrome.tabs.create({url:button.dataset.open,active:true})));
     list.querySelectorAll<HTMLButtonElement>('[data-dryrun]').forEach(button=>button.addEventListener('click',()=>void runDryRun(button.dataset.dryrun||'',button)));
@@ -384,6 +401,7 @@ async function loadTasks(){
 }
 
 function renderSettings(settings:ExtensionSettings){
+  $<HTMLSelectElement>('#xiaohongshu-mode').value=settings.xiaohongshuMode;
   $<HTMLInputElement>('#sync-cover').checked=settings.syncCover;
   $<HTMLInputElement>('#auto-summary').checked=settings.autoSummary;
   $<HTMLInputElement>('#append-source-link').checked=settings.appendSourceLink;
@@ -396,6 +414,7 @@ function renderSettings(settings:ExtensionSettings){
 
 async function saveSettingsFromForm(){
   currentSettings=normalizeSettings({
+    xiaohongshuMode:$<HTMLSelectElement>('#xiaohongshu-mode').value,
     syncCover:$<HTMLInputElement>('#sync-cover').checked,
     autoSummary:$<HTMLInputElement>('#auto-summary').checked,
     appendSourceLink:$<HTMLInputElement>('#append-source-link').checked,
@@ -567,7 +586,7 @@ $<HTMLButtonElement>('#history-clear').addEventListener('click',async()=>{
   await loadTasks();
 });
 
-['#sync-cover','#auto-summary','#append-source-link','#confirm-update','#image-failure','#wechat-code-theme'].forEach(selector=>$(selector).addEventListener('change',()=>void saveSettingsFromForm()));
+['#xiaohongshu-mode','#sync-cover','#auto-summary','#append-source-link','#confirm-update','#image-failure','#wechat-code-theme'].forEach(selector=>$(selector).addEventListener('change',()=>void saveSettingsFromForm()));
 ['#default-category','#category-mappings'].forEach(selector=>$(selector).addEventListener('change',()=>void saveSettingsFromForm()));
 
 $('#health-detail').addEventListener('click',()=>void chrome.tabs.create({url:STATUS_PAGE_URL,active:true}));

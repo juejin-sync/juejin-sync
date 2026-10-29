@@ -2,6 +2,7 @@
 import type {CategoryMapping,ExtensionSettings} from '../types';
 
 export const defaultSettings:ExtensionSettings={
+  xiaohongshuMode:'both',
   defaultCsdnCategory:'',
   categoryMappings:[],
   syncCover:true,
@@ -20,6 +21,7 @@ export function normalizeSettings(value:unknown):ExtensionSettings{
   const themeCandidate=input.wechatCodeTheme;
   const wechatCodeTheme=themeCandidate==='github-light'||themeCandidate==='monokai'?themeCandidate:'onedark';
   return{
+    xiaohongshuMode:input.xiaohongshuMode==='article'||input.xiaohongshuMode==='image'?input.xiaohongshuMode:'both',
     defaultCsdnCategory:clean(input.defaultCsdnCategory),
     categoryMappings:mappings,
     syncCover:input.syncCover!==false,

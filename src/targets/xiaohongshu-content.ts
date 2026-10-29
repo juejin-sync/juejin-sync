@@ -1,51 +1,29 @@
-// 小红书图文笔记编译器：Markdown 转纯文本正文与有序图片，遵循平台标题/正文/图片上限。
-import type {Article} from '../types';
-import {SyncError} from '../core/diagnostic';
+// 小红书共享文本提取：Markdown 转可读文本与图片候选，格式限制由双格式编译器处理。
 import {resolveMermaidDiagram} from '../core/mermaid-render';
 import {normalizeMarkdown} from './csdn-api';
+import {Lexer} from 'marked';
 
-export const XHS_TITLE_MAX=20;
-export const XHS_BODY_MAX=1000;
-export const XHS_IMAGE_MAX=18;
 export const XHS_TOPIC_MAX=10;
 export const XHS_TOPIC_MAX_LENGTH=20;
 
-const TRUNCATE_SUFFIX='…';
-const SOURCE_NOTE='本文首发于掘金';
 const IMAGE_PATTERN=/!\[[^\]]*\]\(\s*<?([^)\s>]+)>?(?:\s+["'][^"']*["'])?\s*\)/g;
 const HTML_IMAGE_PATTERN=/<img\b[^>]*\bsrc=["']([^"']+)["']/gi;
 const TABLE_SEPARATOR=/^\s*\|?[\s:|-]+\|?\s*$/;
 
-export type XiaohongshuNote={title:string;body:string;images:string[];warnings:string[]};
-export type XiaohongshuCompileOptions={appendSourceLink?:boolean;syncCover?:boolean;mermaidImages?:Map<string,string>};
 
 export type XiaohongshuTextResult={text:string;images:string[];warnings:string[];hasCode:boolean;hasTable:boolean;hasFormula:boolean};
 
-function codePointLength(value:string){return[...value].length;}
 function sliceCodePoints(value:string,limit:number){return[...value].slice(0,limit).join('');}
 
 /** 去除行内 Markdown/HTML 标记，保留可读文本（链接只留文字，图片另行提取）。 */
 export function stripInlineMarkdown(text:string):string{
-  return text
-    .replace(IMAGE_PATTERN,'')
-    .replace(/\[([^\]]*)\]\([^)]*\)/g,'$1')
-    .replace(/<[^>]+>/g,'')
-    .replace(/`([^`]*)`/g,'$1')
-    .replace(/(\*\*|__)(.*?)\1/g,'$2')
-    .replace(/~~(.*?)~~/g,'$1')
-    .replace(/(^|[\s（(【])([*_])([^*_\n]+)\2(?=[\s）)】。，,.!?！？]|$)/g,'$1$3')
-    .replace(/[*_~`]{2,}/g,'')
-    .replace(/\\([\\`*_{}[\]()#+\-.!])/g,'$1')
-    .replace(/\s+/g,' ')
-    .trim();
-}
-
-/** 标题按平台 20 字限制截断；空标题直接阻断，避免生成无名草稿。 */
-export function buildXiaohongshuTitle(raw:string){
-  const cleaned=stripInlineMarkdown(raw||'').replace(/\s+/g,' ').trim();
-  if(!cleaned)throw new SyncError('小红书标题不能为空，请补充文章标题','content','validation');
-  if(codePointLength(cleaned)<=XHS_TITLE_MAX)return{title:cleaned,truncated:false};
-  return{title:`${sliceCodePoints(cleaned,XHS_TITLE_MAX-1)}${TRUNCATE_SUFFIX}`,truncated:true};
+  // 先解析标记再提取文本，不能把代码和配置值中的星号、下划线当作排版符号删除。
+  const plain=(tokens:any[]):string=>tokens.map(token=>{
+    if(token.type==='image'||token.type==='html')return '';
+    if(token.type==='br')return ' ';
+    return token.tokens?plain(token.tokens):(token.text||'');
+  }).join('');
+  return plain(Lexer.lexInline(text)).replace(/\s+/g,' ').trim();
 }
 
 function pushImage(images:string[],src:string){
@@ -53,18 +31,6 @@ function pushImage(images:string[],src:string){
   if(value&&!images.includes(value))images.push(value);
 }
 
-/** 正文按段落边界截断，优先保留完整句子；上限之外追加省略号。 */
-export function truncateXiaohongshuBody(body:string,limit=XHS_BODY_MAX){
-  const chars=[...body];
-  if(chars.length<=limit)return{text:body,truncated:false};
-  const candidate=chars.slice(0,limit-1).join('');
-  const breakpoints=['\n','。','！','？','；','. ','! ','? '].map(token=>candidate.lastIndexOf(token));
-  const breakAt=Math.max(...breakpoints);
-  const keep=breakAt>=Math.floor(limit*0.6)?candidate.slice(0,breakAt+1):candidate;
-  return{text:`${keep.trimEnd()}${TRUNCATE_SUFFIX}`,truncated:true};
-}
-
-/** 标签转 #话题：去掉空白与标点、按大小写去重、最多 10 个。 */
 /** 标签转 #话题：去掉空白与标点、按大小写去重、单标签限长、最多 10 个。 */
 export function formatXiaohongshuTopics(tags:string[]){
   const seen=new Set<string>();
@@ -166,49 +132,4 @@ export function markdownToXiaohongshuText(markdown:string,mermaidImages?:Map<str
 
   const text=output.join('\n').replace(/\n{3,}/g,'\n\n').replace(/^\n+|\n+$/g,'').trim();
   return{text,images,warnings,hasCode,hasTable,hasFormula};
-}
-
-export function validateXiaohongshuNote(note:XiaohongshuNote){
-  if(!note.title.trim())throw new SyncError('小红书标题不能为空，请补充文章标题','content','validation');
-  if(codePointLength(note.title)>XHS_TITLE_MAX)throw new SyncError(`小红书标题不能超过 ${XHS_TITLE_MAX} 字`,'content','validation');
-  if(!note.body.trim())throw new SyncError('小红书正文不能为空，请补充文章内容','content','validation');
-  if(codePointLength(note.body)>XHS_BODY_MAX)throw new SyncError(`小红书正文不能超过 ${XHS_BODY_MAX} 字`,'content','validation');
-  if(note.images.length===0)throw new SyncError('小红书图文笔记至少需要 1 张图片：请为文章添加封面或正文配图','content','validation');
-  if(note.images.length>XHS_IMAGE_MAX)throw new SyncError(`小红书图文笔记最多 ${XHS_IMAGE_MAX} 张图片`,'content','validation');
-}
-
-/** 编译为可直接驱动发布页的笔记结构：标题、正文、图片顺序与全部警告。 */
-export function compileXiaohongshuNote(article:Article,options:XiaohongshuCompileOptions={}):XiaohongshuNote{
-  if(!article?.markdown?.trim())throw new SyncError('文章正文不完整，暂无法同步到小红书','content','validation');
-  const warnings:string[]=[];
-  const {title,truncated:titleTruncated}=buildXiaohongshuTitle(article.title);
-  if(titleTruncated)warnings.push(`标题超过 ${XHS_TITLE_MAX} 字，已截断`);
-
-  const converted=markdownToXiaohongshuText(article.markdown,options.mermaidImages);
-  warnings.push(...converted.warnings);
-
-  const images:string[]=[];
-  if(options.syncCover!==false&&article.cover?.trim())pushImage(images,article.cover);
-  for(const src of converted.images)pushImage(images,src);
-  if(images.length>XHS_IMAGE_MAX){
-    images.splice(XHS_IMAGE_MAX);
-    warnings.push(`图片超过 ${XHS_IMAGE_MAX} 张上限，已保留前 ${XHS_IMAGE_MAX} 张`);
-  }
-
-  const tailSegments:string[]=[];
-  const topics=formatXiaohongshuTopics(article.tags||[]);
-  if(topics)tailSegments.push(topics);
-  if(options.appendSourceLink!==false&&article.sourceUrl){
-    tailSegments.push(SOURCE_NOTE);
-    warnings.push('已省略原文链接：小红书正文不支持外链');
-  }
-  const tail=tailSegments.length?`\n\n${tailSegments.join('\n\n')}`:'';
-  // 先为话题与来源说明预留篇幅：长文只截正文，尾部信息必须完整保留。
-  const bodyBudget=Math.max(1,XHS_BODY_MAX-codePointLength(tail));
-  const truncatedBody=truncateXiaohongshuBody(converted.text,bodyBudget);
-  if(truncatedBody.truncated)warnings.push(`正文超过 ${XHS_BODY_MAX} 字，已截断`);
-
-  const note:XiaohongshuNote={title,body:`${truncatedBody.text}${tail}`,images,warnings};
-  validateXiaohongshuNote(note);
-  return note;
 }

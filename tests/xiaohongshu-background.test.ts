@@ -185,6 +185,25 @@ describe('后台小红书同步消息链路', ()=>{
     expect(platform.writes).toBe(0);
   });
 
+  it('双格式各自保留结果，精简图文失败后的重试不会重建长文',async()=>{
+    const long=await send({type:'SYNC_NEW_ARTICLE',platform:'xiaohongshu',article,accountId:'xhs_a',xiaohongshuFormat:'article'});
+    const imageContent={title:'精简版标题',body:'确认后的精简内容。',cards:[{heading:'重点',body:'真实内容。'}],selectedImageKeys:[]};
+    platform.mode='uncertain';
+    const image=await send({type:'SYNC_NEW_ARTICLE',platform:'xiaohongshu',article,accountId:'xhs_a',xiaohongshuFormat:'image',xiaohongshuImageContent:imageContent});
+    expect(image.ok).toBe(false);
+    expect(store.syncTasks).toHaveLength(2);
+    const failed=store.syncTasks.find((task:any)=>task.xiaohongshuFormat==='image');
+    expect(store.syncTasks.find((task:any)=>task.xiaohongshuFormat==='article')).toMatchObject({id:long.task.id,status:'saved',xiaohongshuDraftId:'local-xhs_a-1'});
+    expect(failed).toMatchObject({status:'needs-user',xiaohongshuImageContent:imageContent});
+    failed.article.markdown=article.markdown;
+    platform.mode='success';
+    await send({type:'RETRY_TASK',id:failed.id,confirmUncertain:true});
+    await vi.advanceTimersByTimeAsync(100);
+    expect(store.syncTasks.find((task:any)=>task.id===long.task.id).xiaohongshuDraftId).toBe('local-xhs_a-1');
+    expect(store.syncTasks.find((task:any)=>task.id===failed.id)).toMatchObject({status:'saved',xiaohongshuFormat:'image',xiaohongshuDraftId:'local-xhs_a-3'});
+    expect(platform.writes).toBe(3);
+  });
+
   it('无法取得账号标识时拒绝创建任务',async()=>{
     platform.accountId='';
     const result=await send({type:'SYNC_NEW_ARTICLE',platform:'xiaohongshu',article,accountId:''});

@@ -1,4 +1,4 @@
-// 小红书隔离世界驱动：独立图文页先传图后填表，只点击“暂存离开”并确认本地事务完成。
+// 小红书隔离世界驱动：分别写入长文与精简图文，只点击“暂存离开”并确认本地事务完成。
 import {normalizeXiaohongshuText,parseXiaohongshuUser} from './targets/xiaohongshu-capture';
 
 const RESPONSE_EVENT='article-ferry:xhs-response';
@@ -44,7 +44,20 @@ async function waitForElement<T extends Element>(selectors:string[],timeoutMs:nu
 
 /** 精确匹配真实页面的保存文案，不匹配“发布”或包含额外动作的按钮。 */
 function findSaveButton(){
-  return [...document.querySelectorAll<HTMLButtonElement>('button')].find(button=>isVisible(button)&&!button.disabled&&(button.textContent||'').replace(/\s+/g,'')==='暂存离开');
+  const button=[...document.querySelectorAll<HTMLButtonElement>('button')].find(button=>isVisible(button)&&!button.disabled&&(button.textContent||'').replace(/\s+/g,'')==='暂存离开');
+  if(button)return button;
+  // 新版底部按钮位于 closed Shadow DOM；通过组件已公开的 save 事件保存，不访问内部节点。
+  const isReady=(host:HTMLElement)=>{
+    const disabled=host.getAttribute('save-disabled');
+    return isVisible(host)&&host.getAttribute('is-save-draft')!=='false'&&
+      (disabled===null||disabled==='false')&&
+      (host.getAttribute('save-text')??'暂存离开').replace(/\s+/g,'')==='暂存离开';
+  };
+  const host=[...document.querySelectorAll<HTMLElement>('xhs-publish-btn')].find(isReady);
+  if(host)return{click:()=>{
+    if(!isReady(host))throw new Error('暂存控件当前不可用');
+    host.dispatchEvent(new CustomEvent('save',{bubbles:true,composed:true}));
+  }};
 }
 
 async function prepareImageNote(){
@@ -163,6 +176,100 @@ async function uploadImage(payload:{base64:string;mime:string;name:string;imageC
   return{ok:false,message:'小红书图片上传超时，请检查保留的编辑页'};
 }
 
+const ARTICLE_EDITOR='.rich-editor-content .tiptap.ProseMirror[contenteditable="true"]';
+/** 请求主世界服务，只返回图片地址或保存凭证，上传许可不跨世界传递。 */
+function articlePageRequest(action:string,payload:unknown):Promise<any>{
+  const requestId=crypto.randomUUID(),root=document.documentElement,attr='data-article-ferry-xhs-article';
+  return new Promise(resolve=>{
+    const finish=(result:any)=>{clearTimeout(timer);document.removeEventListener('article-ferry:xhs-article-response',listener);resolve(result);};
+    const listener=()=>{try{const result=JSON.parse(root.getAttribute(attr)||'{}');if(result.requestId===requestId)finish(result);}catch{}};
+    const timer=setTimeout(()=>finish({ok:false,message:'小红书长文服务超时，请核对草稿箱后再试'}),45000);
+    document.addEventListener('article-ferry:xhs-article-response',listener);
+    root.setAttribute(attr,JSON.stringify({requestId,action,payload}));document.dispatchEvent(new Event('article-ferry:xhs-article-request'));root.removeAttribute(attr);
+  });
+}
+function importArticle(payload:any){
+  const document=new DOMParser().parseFromString(payload.html,'text/html');
+  function walk(node:Node):any[]{
+    if(node.nodeType===3)return node.textContent?[{type:'text',text:node.textContent.replace(/\u00a0/g,' ')}]:[];
+    if(node.nodeType!==1)return [];
+    const element=node as Element,tag=element.tagName.toLowerCase();
+    if(element.hasAttribute('data-xhs-image')){
+      const image=payload.images[Number(element.getAttribute('data-xhs-image'))];
+      return[{type:'image',attrs:{imgs:[{src:image.src,desc:'',percent:0,width:410,height:410*image.height/image.width}]}}];
+    }
+    if(tag==='br')return[{type:'hardBreak'}];
+    const content=[...node.childNodes].flatMap(walk);
+    const type:Record<string,string>={p:'paragraph',h1:'heading',h2:'heading',ul:'bulletList',ol:'orderedList',li:'listItem',blockquote:'blockquote'};
+    if(!type[tag])throw new Error('长文包含未经校准的结构');
+    return[{type:type[tag],...(tag==='h1'||tag==='h2'?{attrs:{level:Number(tag[1])}}:{}),...(content.length?{content}:{})}];
+  }
+  const richJson={type:'doc',content:[...document.body.childNodes].flatMap(walk)};
+  return articlePageRequest('import',{...payload,richJson,imageCount:payload.images.length});
+}
+async function prepareArticle(){
+  const end=Date.now()+20000;
+  while(Date.now()<end){
+    if(findFirst([ARTICLE_EDITOR])&&findFirst(['textarea[placeholder="输入标题"]']))return{ok:true};
+    const create=[...document.querySelectorAll<HTMLButtonElement>('button')].find(b=>isVisible(b)&&(b.textContent||'').trim()==='新的创作');
+    if(create)create.click();
+    else{
+      const tab=[...document.querySelectorAll<HTMLElement>('.creator-tab')].find(e=>isVisible(e)&&(e.textContent||'').trim()==='写长文');
+      if(tab)tab.click();
+    }
+    await sleep(300);
+  }
+  return{ok:false,message:'未找到小红书长文编辑器，页面可能已改版'};
+}
+/** 使用页面原生粘贴处理器，让编辑器自己更新 richJson；不直接写平台内部状态。 */
+function pasteArticleHtml(editor:HTMLElement,html:string,replace:boolean){
+  editor.focus();
+  const range=document.createRange();range.selectNodeContents(editor);
+  if(!replace)range.collapse(false);
+  const selection=window.getSelection();selection?.removeAllRanges();selection?.addRange(range);
+  const data=new DataTransfer();data.setData('text/html',html);
+  editor.dispatchEvent(new ClipboardEvent('paste',{bubbles:true,cancelable:true,clipboardData:data}));
+}
+async function fillArticle(payload:{title?:string;html?:string},append=false){
+  const editor=findFirst<HTMLElement>([ARTICLE_EDITOR]);
+  const title=findFirst<HTMLTextAreaElement>(['textarea[placeholder="输入标题"]']);
+  if(!editor||!title)return{ok:false,message:'长文编辑器未就绪'};
+  if(!append){
+    if(!payload.title?.trim()||payload.title.length>Number(title.maxLength))return{ok:false,message:'长文标题超出页面限制'};
+    setInputValue(title,payload.title);
+  }
+  if(payload.html)pasteArticleHtml(editor,payload.html,!append);
+  await sleep(400);
+  return{ok:true};
+}
+async function uploadArticleImage(payload:{base64:string;mime:string;name:string;imageCount:number}){
+  const editor=findFirst<HTMLElement>([ARTICLE_EDITOR]);
+  if(!editor)return{ok:false,message:'长文编辑器未就绪'};
+  editor.focus();const range=document.createRange();range.selectNodeContents(editor);range.collapse(false);
+  const selection=window.getSelection();selection?.removeAllRanges();selection?.addRange(range);
+  const data=new DataTransfer();data.items.add(dataUrlToFile(payload.base64,payload.mime,payload.name));
+  // ProseMirror 对无文本切片的粘贴会在 fallback 中再次调用 handlePaste，造成重复上传。
+  // 空段落提供合法切片，使文件处理器只执行一次；不向正文添加占位文字。
+  data.setData('text/html','<p></p>');
+  editor.dispatchEvent(new ClipboardEvent('paste',{bubbles:true,cancelable:true,clipboardData:data}));
+  const end=Date.now()+45000;
+  while(Date.now()<end){
+    const images=[...editor.querySelectorAll<HTMLImageElement>('img:not([data-emoji-shortcode])')];
+    if(images.length===payload.imageCount&&images.every(img=>/^https:\/\//.test(img.src)&&img.complete&&img.naturalWidth>0))return{ok:true};
+    await sleep(300);
+  }
+  return{ok:false,message:'长文配图上传超时，请检查保留的编辑页'};
+}
+function checkArticle(payload:{title:string;body:string;imageCount:number}){
+  const editor=findFirst<HTMLElement>([ARTICLE_EDITOR]);
+  const title=findFirst<HTMLTextAreaElement>(['textarea[placeholder="输入标题"]']);
+  const text=editor?[...editor.querySelectorAll<HTMLElement>('p,h1,h2')].map(e=>e.innerText||'').join('\n'):'';
+  // 上限 span 使用 v-show 隐藏但仍有 textContent，不能凭 /10000 文本判定超限。
+  if(document.querySelector('.rich-editor-container .char-count.danger-text'))return{ok:false,message:'长文超过页面字数限制，请精简后重试'};
+  return title?.value===payload.title&&normalizeXiaohongshuText(text)===normalizeXiaohongshuText(payload.body)&&editor?.querySelectorAll('img:not([data-emoji-shortcode])').length===payload.imageCount
+    ?{ok:true}:{ok:false,message:'长文内容或配图未完整进入编辑器，请检查草稿'};
+}
+
 /** 点击前武装只读事务观测，必须收到本次请求的保存凭证才报告成功。 */
 async function saveNote(payload:{accountId:string;title:string;body:string;imageCount:number}){
   const end=Date.now()+10000;
@@ -205,6 +312,13 @@ async function handleAction(action:string,payload:any){
   switch(action){
     case 'PING':return{ok:true};
     case 'GET_SESSION':return getSession();
+    case 'UPLOAD_ARTICLE_FILE':return articlePageRequest('upload',payload);
+    case 'IMPORT_ARTICLE':return importArticle(payload);
+    case 'PREPARE_ARTICLE':return prepareArticle();
+    case 'FILL_ARTICLE':return fillArticle(payload);
+    case 'APPEND_ARTICLE_HTML':return fillArticle(payload,true);
+    case 'UPLOAD_ARTICLE_IMAGE':return uploadArticleImage(payload);
+    case 'CHECK_ARTICLE':return checkArticle(payload);
     case 'PREPARE_IMAGE_NOTE':return prepareImageNote();
     case 'WAIT_EDITOR':return waitEditor(Number(payload?.timeoutMs)||20000);
     case 'FILL_TEXT':return fillText(payload);

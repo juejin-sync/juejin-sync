@@ -1,4 +1,5 @@
-// 小红书主世界只读观测器：只确认页面自身完成的图文草稿事务，不发起存储写入或发布请求。
+// 小红书主世界入口：图文事务只读观测，长文独立导入新草稿；不执行发布。
+import './xiaohongshu-article-page';
 import {normalizeXiaohongshuText,parseXiaohongshuLocalDraft} from './targets/xiaohongshu-capture';
 
 const COMMAND_EVENT='article-ferry:xhs-command';
@@ -6,7 +7,7 @@ const COMMAND_ATTRIBUTE='data-article-ferry-xhs-command';
 const ACK_ATTRIBUTE='data-article-ferry-xhs-ack';
 const RESPONSE_EVENT='article-ferry:xhs-response';
 const RESPONSE_ATTRIBUTE='data-article-ferry-xhs';
-type ExpectedSave={requestId:string;accountId:string;title:string;body:string;imageCount:number};
+type ExpectedSave={format?:'article'|'image';requestId:string;accountId:string;title:string;body:string;imageCount:number};
 let expected:ExpectedSave|undefined;
 let expiry:ReturnType<typeof setTimeout>|undefined;
 
@@ -29,7 +30,7 @@ function armSave(){
   try{
     const command=JSON.parse(raw);
     if(command.cancel){if(expected?.requestId===command.requestId){expected=undefined;clearTimeout(expiry);}return;}
-    if(typeof command.requestId!=='string'||typeof command.accountId!=='string'||typeof command.title!=='string'||typeof command.body!=='string'||!Number.isInteger(command.imageCount)||command.imageCount<1)return;
+    if(typeof command.requestId!=='string'||typeof command.accountId!=='string'||typeof command.title!=='string'||typeof command.body!=='string'||!Number.isInteger(command.imageCount)||command.imageCount<(command.format==='article'?0:1))return;
     expected=command;
     clearTimeout(expiry);
     expiry=setTimeout(()=>{expected=undefined;},45000);
@@ -46,7 +47,7 @@ function observeLocalDrafts(){
     const request=key===undefined?originalPut.call(this,value):originalPut.call(this,value,key);
     try{
       const operation=expected;
-      const draft=this.name==='image-draft'&&operation?parseXiaohongshuLocalDraft(value):undefined;
+      const draft=operation&&this.name===(operation.format==='article'?'article-draft':'image-draft')?parseXiaohongshuLocalDraft(value,operation.format):undefined;
       if(!operation||!draft||draft.accountId!==operation.accountId||!draft.imagesComplete||draft.imageCount!==operation.imageCount||
         normalizeXiaohongshuText(draft.title)!==normalizeXiaohongshuText(operation.title)||normalizeXiaohongshuText(draft.body)!==normalizeXiaohongshuText(operation.body))return request;
       // request success 仍可能被后续写入回滚，只有整个事务 complete 才能确认保存。

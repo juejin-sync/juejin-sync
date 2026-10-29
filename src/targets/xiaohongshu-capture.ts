@@ -1,4 +1,5 @@
-// 小红书真实页面契约：解析 galaxy 用户信息与 image-draft 本地保存记录。
+// 小红书真实页面契约：解析 galaxy 用户信息与两类本地草稿保存记录。
+import type {XiaohongshuFormat} from '../types';
 export type XiaohongshuUser={accountId:string;account?:string};
 export type XiaohongshuLocalDraft={draftId:string;accountId:string;title:string;body:string;imageCount:number;imagesComplete:boolean};
 
@@ -14,7 +15,27 @@ export function parseXiaohongshuUser(payload:unknown):XiaohongshuUser|undefined{
 }
 
 /** 仅提取保存凭证，图片二进制、完整编辑器状态和其他平台数据不经过扩展桥接。 */
-export function parseXiaohongshuLocalDraft(value:unknown):XiaohongshuLocalDraft|undefined{
+export function parseXiaohongshuLocalDraft(value:unknown,format:XiaohongshuFormat='image'):XiaohongshuLocalDraft|undefined{
+  if(format==='article'){
+    const record=value as {draftId?:unknown;uid?:unknown;content?:{articleStore?:{articleTitle?:unknown;richJson?:unknown}}}|null;
+    const article=record?.content?.articleStore;
+    if(typeof record?.draftId!=='string'||!record.draftId||typeof record.uid!=='string'||!record.uid||typeof article?.articleTitle!=='string')return undefined;
+    const text:string[]=[],images:string[]=[];
+    function walk(node:any):boolean{
+      if(!node||typeof node.type!=='string')return false;
+      if(node.type==='text'){if(typeof node.text!=='string')return false;text.push(node.text);}
+      if(node.type==='hardBreak')text.push('\n');
+      if(node.type==='image'){
+        if(!Array.isArray(node.attrs?.imgs)||!node.attrs.imgs.length)return false;
+        for(const image of node.attrs.imgs){if(typeof image.src!=='string')return false;images.push(image.src);}
+      }
+      if(node.content!==undefined){if(!Array.isArray(node.content)||!node.content.every(walk))return false;}
+      if(['paragraph','heading'].includes(node.type))text.push('\n');
+      return true;
+    }
+    if(!walk(article.richJson))return undefined;
+    return{draftId:record.draftId,accountId:record.uid,title:article.articleTitle,body:text.join(''),imageCount:images.length,imagesComplete:images.every(src=>/^https:\/\//.test(src))};
+  }
   const record=value as {draftId?:unknown;uid?:unknown;content?:{draftStore?:{title?:unknown;desc?:unknown;imgList?:Array<{fileId?:unknown}>}}}|null;
   const note=record?.content?.draftStore;
   if(typeof record?.draftId!=='string'||!record.draftId||typeof record.uid!=='string'||!record.uid)return undefined;
