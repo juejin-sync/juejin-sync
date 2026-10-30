@@ -11,7 +11,7 @@
 
 [![Release](https://img.shields.io/github/v/release/juejin-sync/juejin-sync)](https://github.com/juejin-sync/juejin-sync/releases)
 [![CI](https://github.com/juejin-sync/juejin-sync/actions/workflows/ci.yml/badge.svg)](https://github.com/juejin-sync/juejin-sync/actions/workflows/ci.yml)
-[![Tests](https://img.shields.io/badge/tests-396%20passed-brightgreen)](tests)
+[![Tests](https://img.shields.io/badge/tests-404%20passed-brightgreen)](tests)
 [![License](https://img.shields.io/github/license/juejin-sync/juejin-sync)](LICENSE)
 
 掘金同步助手是一款 Chrome Manifest V3 浏览器扩展。它读取你主动选择的掘金文章或编辑器草稿，在浏览器本地处理排版与图片后同步到目标平台的草稿箱。**纯本地运行，不依赖任何第三方中转服务器，零凭据托管。**
@@ -28,15 +28,7 @@
 | <img src="assets/platform-wechat.png" width="18" height="18" valign="middle" alt="微信公众号"> **微信公众号** | 草稿箱（原生图文排版、代码高亮与封面裁剪） | ✅ 已支持 |
 | <img src="assets/platform-cnblogs.png" width="18" height="18" valign="middle" alt="博客园"> **博客园** | 随笔草稿箱（Markdown 适配与图片转存） | ✅ 已支持 |
 | <img src="assets/platform-zhihu.png" width="18" height="18" valign="middle" alt="知乎专栏"> **知乎专栏** | 专栏草稿箱（富文本排版与公式高保真） | ✅ 已支持 |
-| <img src="assets/platform-xiaohongshu.png" width="18" height="18" valign="middle" alt="小红书"> **小红书** | 浏览器本地长文 / 精简图文卡片草稿（后台同步、每次新建） | ✅ 已支持 |
-
-在插件「偏好设置」中配置小红书同步格式，默认「两种都同步」，也可选择「仅长文」或「仅精简图文」。选中小红书后直接后台处理，不弹出自制编辑器或强制预览。每份任务固定创建时的格式，之后修改偏好不影响执行与重试。
-
-长文标题最多 64 字符，正文与配图合计按平台预算不超过 10000 字。正常长度保留全文；超限时在本地去重并按完整内容块精简，保留章节、步骤、识别到的参数与限制，整块省略长代码和非关键大表格并附公开原文入口。精简版在正文与同步记录明确标注，不接入 AI、不需要密钥；规则无法保证原意完整，必要内容仍超限或原文尚未公开时明确失败，不硬删、不截断半段。代码逐行转文本、表格转字段列表，强调、链接和公式以可读文本保留。长文使用结构化本地草稿导入，事务完成并读回一致后才确认保存；真实恢复验收仍待完成。
-
-精简图文由本地规则从全文章节抽取重点并生成图卡，不调用外部 AI 服务。标题最多 20 字符、正文最多 1000 字，图卡分页与配图合计最多 18 张；超限在同步记录说明。两种格式分别记录保存结果，失败重试互不影响。同步记录默认折叠排版说明，精简稿展示字数摘要，可展开核对全部详情；未知警告仍保留警告状态。同步后请在小红书草稿箱核对内容和排版。
-
-两类草稿均保存在当前浏览器本地，从创作服务平台发布页的「草稿箱」打开。每次同步新建，清除浏览器数据会删除草稿；平台分别限制最多 100 篇长文和图文草稿，请及时检查。图片支持 JPG、PNG、WebP（长文在本地转为 PNG），长文单张不超过 10MB，图文单张不超过 32MB。
+| <img src="assets/platform-xiaohongshu.png" width="18" height="18" valign="middle" alt="小红书"> **小红书** | 浏览器本地长文 / 精简图文草稿（后台静默同步） | ✅ 已支持 |
 
 ---
 

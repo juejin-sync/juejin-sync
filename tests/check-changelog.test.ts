@@ -85,7 +85,7 @@ describe('CHANGELOG 格式校验器 (check-changelog)', () => {
       expect(result.success).toBe(true);
       expect(result.errors).toEqual([]);
       expect(result.version).toBe('1.6.0');
-      expect(result.totalItems).toBe(4);
+      expect(result.totalItems).toBe(5);
     });
   });
 });
